@@ -57,8 +57,9 @@ export class Tank {
     this.damp = 12000;          // Increased damping for stability
     this.restLen = 0.78;
     this.maxComp = 0.8;         // Increased max compression
-    this.engineForce = 65000;   // Increased engine power to climb mountains
+    this.engineForce = 65000;   // Engine power
     this.brakeForce = 45000;
+    this.hasClimbingKit = false; // Upgrade flag
 
     this.wheels = [
       new THREE.Vector3(-1.35, -0.55, -2.45),
@@ -122,26 +123,17 @@ export class Tank {
 
     // ---- hull ----
     add(new THREE.BoxGeometry(3.05, 0.85, 6.4), oliveDark, 0, -0.18, 0);
-
     add(new THREE.BoxGeometry(3.45, 0.55, 5.9), olive, 0, 0.50, 0.10);
-
-    // sloped glacis plate
     add(new THREE.BoxGeometry(3.45, 1.15, 1.9), olive, 0, 0.22, -2.85, -0.62);
-
-    // rear plate
     add(new THREE.BoxGeometry(3.3, 0.9, 0.5), oliveDark, 0, 0.25, 3.05, 0.22);
-
-    // side skirts
     add(new THREE.BoxGeometry(0.14, 0.7, 5.6), oliveDark, -1.78, 0.15, 0);
     add(new THREE.BoxGeometry(0.14, 0.7, 5.6), oliveDark, 1.78, 0.15, 0);
 
-    // fenders / stowage
     add(new THREE.BoxGeometry(0.55, 0.35, 1.5), olive, -1.62, 0.72, 1.6);
     add(new THREE.BoxGeometry(0.55, 0.35, 1.5), olive, 1.62, 0.72, 1.6);
     add(new THREE.BoxGeometry(0.6, 0.28, 1.0), oliveDark, 1.6, 0.78, -1.9);
     add(new THREE.BoxGeometry(0.6, 0.28, 1.0), oliveDark, -1.6, 0.78, -1.9);
 
-    // tow hooks
     add(new THREE.BoxGeometry(0.14, 0.14, 0.5), steel, -0.9, 0.05, -3.5);
     add(new THREE.BoxGeometry(0.14, 0.14, 0.5), steel, 0.9, 0.05, -3.5);
 
@@ -159,17 +151,14 @@ export class Tank {
         add(hubGeo, steel, side * 1.635, -0.46, z);
         this.wheelMeshes.push(w);
       }
-      // drive sprocket + idler
       const sp = add(new THREE.CylinderGeometry(0.5, 0.5, 0.26, 12), steel, side * 1.62, -0.05, 2.75);
       sp.geometry.rotateZ(Math.PI / 2);
       this.wheelMeshes.push(sp);
       const idler = add(new THREE.CylinderGeometry(0.46, 0.46, 0.26, 12), steel, side * 1.62, -0.05, -2.85);
       this.wheelMeshes.push(idler);
 
-      // track band (outer surface)
       const band = add(new THREE.BoxGeometry(0.10, 1.02, 6.9), this.trackMat, side * 1.84, -0.25, 0);
       band.castShadow = true;
-      // top run
       add(new THREE.BoxGeometry(0.32, 0.12, 6.9), this.trackMat, side * 1.62, 0.20, 0);
     }
 
@@ -193,7 +182,6 @@ export class Tank {
     bustle.castShadow = true;
     this.turret.add(bustle);
 
-    // commander cupola
     const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.32, 10), oliveDark);
     cup.position.set(-0.55, 1.03, 0.35);
     cup.castShadow = true;
@@ -230,7 +218,6 @@ export class Tank {
     this.muzzle.position.set(0, 0, -5.4);
     this.gunPivot.add(this.muzzle);
 
-    // coaxial MG + antenna
     const coax = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.9, 6), dark);
     coax.rotation.x = Math.PI / 2;
     coax.position.set(0.62, 0.62, -1.9);
@@ -244,7 +231,6 @@ export class Tank {
 
   // --------------------------------------------------------------- physics
   step(dt, input, tracks) {
-    // A wrecked hull cannot drive: kill the engine inputs and lock the brakes.
     if (!this.alive) {
       this.throttle = 0;
       this.steer = 0;
@@ -262,8 +248,6 @@ export class Tank {
     const h = dt / SUB;
     for (let i = 0; i < SUB; i++) this._substep(h);
 
-    // keep inside the playable area
-    // Keep inside the playable area
     const d = Math.hypot(this.pos.x, this.pos.z);
     if (d > PLAY_RADIUS) {
       const s = PLAY_RADIUS / d;
@@ -275,14 +259,12 @@ export class Tank {
       if (out > 0) { this.vel.x -= nx * out * 1.5; this.vel.z -= nz * out * 1.5; }
     }
 
-    // Anti-sink terrain floor check for steep mountain slopes
     const groundH = heightAt(this.pos.x, this.pos.z);
     if (this.pos.y < groundH + 1) {
       this.pos.y = groundH + 1;
       if (this.vel.y < 0) this.vel.y = 0;
     }
 
-    // tunnel safety
     const gh = heightAt(this.pos.x, this.pos.z);
     if (this.pos.y < gh - 6) {
       this.pos.y = gh + 2.0;
@@ -291,20 +273,16 @@ export class Tank {
       this.quat.identity();
     }
 
-    // ------- visuals -------
     this.root.position.copy(this.pos);
     this.root.quaternion.copy(this.quat);
 
     this.speed = this.vel.dot(_fwd.set(0, 0, -1).applyQuaternion(this.quat));
 
-    // wheels spin from ground speed
     const spin = (this.speed / 0.42) * dt;
     for (const w of this.wheelMeshes) w.rotation.x -= spin;
 
-    // track texture scroll
     this.trackTex.offset.y -= this.speed * dt * 0.55;
 
-    // ------- ground contact dust + track marks -------
     if (this.contactCount > 0 && Math.abs(this.speed) > 0.6) {
       if (Math.random() < 0.6) {
         _v1.set(this.pos.x, this.pos.y - 1.2, this.pos.z)
@@ -314,7 +292,6 @@ export class Tank {
       if (this.sliding > 0.35 && Math.random() < 0.5) {
         _v1.set(this.pos.x, this.pos.y - 1.1, this.pos.z);
         _v3.copy(_v4.set(1, 0, 0).applyQuaternion(this.quat));
-        // sideways mud spray
         for (let i = 0; i < 3; i++) {
           this.effects.smoke.emit(
             _v1.x, _v1.y + 0.3, _v1.z,
@@ -367,6 +344,9 @@ export class Tank {
     const avgNormal = new THREE.Vector3();
     let lateralSlip = 0;
 
+    const gripLimit = this.hasClimbingKit ? 220000 : 26000;
+    const gripMultiplier = this.hasClimbingKit ? 18000 : 3200;
+
     for (const wl of this.wheels) {
       const wp = wl.clone().applyQuaternion(this.quat).add(this.pos);
       const gH = heightAt(wp.x, wp.z);
@@ -383,8 +363,7 @@ export class Tank {
 
       let springF = this.springK * comp - this.damp * upVel;
       if (springF < 0) springF = 0;
-      // Allow higher spring force limit for steep slopes
-      springF = Math.min(springF, this.mass * 150);
+      springF = Math.min(springF, this.mass * (this.hasClimbingKit ? 350 : 150));
 
       const normal = normalAt(wp.x, wp.z, _n);
       avgNormal.add(normal);
@@ -393,7 +372,6 @@ export class Tank {
       force.add(f);
       torque.add(r.clone().cross(f));
 
-      // ---- ground-plane basis ----
       const fwdP = fwd.clone().addScaledVector(normal, -fwd.dot(normal));
       if (fwdP.lengthSq() < 1e-6) continue;
       fwdP.normalize();
@@ -406,7 +384,6 @@ export class Tank {
         drive = -Math.sign(vs) * Math.min(Math.abs(vs) * 4000, this.brakeForce);
       }
       if (drive !== 0) {
-        // don't spin the tracks when airborne-ish
         const df = fwdP.clone().multiplyScalar(drive * 0.25);
         force.add(df);
         torque.add(r.clone().cross(df));
@@ -415,32 +392,38 @@ export class Tank {
       // ---- lateral grip (tracks resist sideways slip) ----
       const latV = pv.dot(rightP);
       lateralSlip += Math.abs(latV);
-      const grip = clamp(-latV * 3200, -26000, 26000);
+      const grip = clamp(-latV * gripMultiplier, -gripLimit, gripLimit);
       const lf = rightP.clone().multiplyScalar(grip * 0.25);
       force.add(lf);
       torque.add(r.clone().cross(lf));
 
-      // ---- rolling resistance ----
+      // ---- rolling resistance & slope hold ----
       const longV = pv.dot(fwdP);
-      const roll = -longV * 900;
+      let rollCoeff = 900;
+      if (this.hasClimbingKit) {
+        // High longitudinal traction when climbing / idling on slopes
+        if (Math.abs(this.throttle) < 0.05) rollCoeff = 12000;
+        else rollCoeff = 2500;
+      }
+      const roll = -longV * rollCoeff;
       const rf = fwdP.clone().multiplyScalar(roll * 0.25);
       force.add(rf);
       torque.add(r.clone().cross(rf));
     }
 
-    // ---- track friction: hold position on gentle slopes when idle ----
+    // ---- anti-slip track friction when stationary ----
     if (contacts > 0 && Math.abs(this.throttle) < 0.01 && !this.braking) {
       const planar = new THREE.Vector3(this.vel.x, 0, this.vel.z);
       const pl = planar.length();
-      if (pl < 3.0) {
-        force.addScaledVector(planar, -this.mass * 3.4);
+      if (pl < (this.hasClimbingKit ? 8.0 : 3.0)) {
+        force.addScaledVector(planar, -this.mass * (this.hasClimbingKit ? 14.0 : 3.4));
       }
     }
 
     this.contactCount = contacts;
     this.sliding = contacts ? lateralSlip / contacts : 0;
 
-    // ---- yaw steering ----
+    // ---- yaw steering & pitch/roll stabilization (prevents flips) ----
     if (contacts > 0) {
       const speed = this.vel.dot(fwd);
       const sf = Math.min(1, Math.abs(speed) / 3.5) * (1 - Math.min(0.62, Math.abs(speed) / 42));
@@ -454,13 +437,27 @@ export class Tank {
       const axis = up.clone().cross(avgNormal);
       const align = axis.length();
       if (align > 0.001) {
-        const strength = Math.min(align, 1) * this.mass * 9.0;
+        const alignStrength = this.hasClimbingKit ? 38.0 : 9.0;
+        const strength = Math.min(align, 1) * this.mass * alignStrength;
         torque.addScaledVector(axis.normalize(), strength);
       }
-      // damp pitch/roll oscillation
+
+      // Anti-flip feature: cancel out excessive pitching/rolling angular momentum
       const yawComp = this.angVel.dot(bodyYawAxis);
       const side = this.angVel.clone().addScaledVector(bodyYawAxis, -yawComp);
-      this.angVel.addScaledVector(side, -Math.min(0.5, dt * 5));
+      const dampRate = this.hasClimbingKit ? 22.0 : 5.0;
+      this.angVel.addScaledVector(side, -Math.min(0.9, dt * dampRate));
+
+      // Direct anti-flip orientation alignment when kit is owned
+      if (this.hasClimbingKit) {
+        const upDotNormal = up.dot(avgNormal);
+        if (upDotNormal < 0.999) {
+          const correctionAxis = up.clone().cross(avgNormal).normalize();
+          const angleDiff = Math.acos(clamp(upDotNormal, -1, 1));
+          const qFix = new THREE.Quaternion().setFromAxisAngle(correctionAxis, angleDiff * Math.min(1, dt * 18));
+          this.quat.premultiply(qFix);
+        }
+      }
     }
 
     // ---- aerodynamic / drivetrain drag ----
@@ -471,9 +468,9 @@ export class Tank {
     // ---- integrate ----
     this.vel.addScaledVector(force, dt / this.mass);
     this.angVel.addScaledVector(torque, dt * this.invInertia);
-    this.angVel.multiplyScalar(Math.max(0, 1 - 1.6 * dt));
+    this.angVel.multiplyScalar(Math.max(0, 1 - (this.hasClimbingKit ? 6.0 : 1.6) * dt));
 
-    const maxAng = 5.5;
+    const maxAng = this.hasClimbingKit ? 2.2 : 5.5;
     if (this.angVel.lengthSq() > maxAng * maxAng) this.angVel.setLength(maxAng);
 
     this.pos.addScaledVector(this.vel, dt);
@@ -502,7 +499,6 @@ export class Tank {
     const worldYaw = Math.atan2(-dx, -dz);
     let targetLocal = wrapAngle(worldYaw - bodyYaw);
 
-    // turret traverse limit
     targetLocal = clamp(targetLocal, -Math.PI, Math.PI);
     this.turretYaw = wrapAngle(
       this.turretYaw + clamp(wrapAngle(targetLocal - this.turretYaw), -1.5 * dt, 1.5 * dt)
@@ -531,12 +527,10 @@ export class Tank {
     const muzzlePos = new THREE.Vector3();
     this.muzzle.getWorldPosition(muzzlePos);
 
-    // Object3D.getWorldDirection() returns +Z; the barrel points down -Z.
     const dir = new THREE.Vector3(0, 0, -1)
       .applyQuaternion(this.muzzle.getWorldQuaternion(new THREE.Quaternion()))
       .normalize();
 
-    // recoil
     this.vel.addScaledVector(dir, -2.2);
     this.angVel.y += (Math.random() - 0.5) * 0.05;
 
@@ -570,7 +564,6 @@ export class Tank {
     }
   }
 
-  // Fire + rolling black smoke pouring off the engine deck of a burning wreck.
   _burnFx(dt) {
     if (!this.burning || !this.effects) return;
     this._burnAccum = (this._burnAccum || 0) + dt;
@@ -582,7 +575,6 @@ export class Tank {
   }
 
   rightSelf() {
-    // find a pose aligned with the local terrain normal
     normalAt(this.pos.x, this.pos.z, _n);
     const q = new THREE.Quaternion().setFromUnitVectors(UP, _n);
     this.quat.slerp(q, 0.85);

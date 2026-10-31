@@ -492,6 +492,57 @@ function flashMessage(text) {
   msgTimer = 2.0;
 }
 
+
+// ---------------------------------------------------------------------------
+// Quartermaster Shop State
+// ---------------------------------------------------------------------------
+let shopOpen = false;
+
+function toggleShop(open) {
+  shopOpen = open !== undefined ? open : !shopOpen;
+  const modal = document.getElementById('shopModal');
+  if (modal) modal.classList.toggle('hidden', !shopOpen);
+  if (shopOpen) {
+    keys.clear();
+    canvas.style.cursor = 'default';
+  } else {
+    canvas.style.cursor = 'none';
+  }
+}
+
+function buyShopItem(itemType) {
+  if (!tank) return;
+  let cost = 0;
+  if (itemType === 'ammo') cost = 300;
+  else if (itemType === 'health') cost = 400;
+  else if (itemType === 'climb') cost = 1000;
+
+  if (score < cost) {
+    flashMessage('INSUFFICIENT SCORE');
+    return;
+  }
+
+  score -= cost;
+  const scoreValEl = document.getElementById('scoreVal');
+  if (scoreValEl) scoreValEl.textContent = score;
+
+  if (itemType === 'ammo') {
+    tank.maxAmmo += 100;
+    tank.ammo = Math.min(tank.maxAmmo, tank.ammo + 100);
+    flashMessage('AMMO RESUPPLY PURCHASED (+100)');
+  } else if (itemType === 'health') {
+    tank.health = Math.min(500, tank.health + 100);
+    if (!tank.alive && tank.health > 0) {
+      tank.burning = false;
+    }
+    flashMessage('HULL REPAIR PURCHASED (+100 HP)');
+  } else if (itemType === 'climb') {
+    tank.engineForce *= 1.35;
+    tank.springK *= 1.30;
+    flashMessage('MOUNTAIN CLIMBING UPGRADE INSTALLED');
+  }
+}
+
 window.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'KeyR' && running) {
@@ -501,6 +552,12 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') {
     mapVisible = !mapVisible;
     document.getElementById('mapPanel').classList.toggle('hidden', !mapVisible);
+  }
+  if (e.code === 'KeyB' && running) {
+    toggleShop();
+  }
+  if (e.code === 'Escape' && shopOpen) {
+    toggleShop(false);
   }
   if (e.code === 'Space') e.preventDefault();
 });
@@ -693,11 +750,16 @@ function loop() {
 
   windUniforms.uTime.value = elapsed;
 
-  if (running) {
+  if (running && !shopOpen) {
     readInput();
     tank.step(dt, input, tracks);
     tank.updateReload(dt);
     if (!tank.alive && !playerDead) onPlayerDeath();
+  } else if (shopOpen) {
+    input.throttle = 0;
+    input.steer = 0;
+    input.brake = true;
+    input.boost = false;
   } else {
     tank.aimAt(tank.pos.clone().add(new THREE.Vector3(0, 0, -300)), dt);
   }
@@ -766,6 +828,8 @@ boot();
 
 window.__game = {
   get tank() { return tank; },
+  toggleShop,
+  buyShopItem,
   get scene() { return scene; },
   get camera() { return camera; },
   get soldiers() { return soldiers; },

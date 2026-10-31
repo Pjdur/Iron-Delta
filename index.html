@@ -105,8 +105,9 @@
   #compassStrip span.card{ color:var(--amber); font-weight:700; }
   #compassMark{ position:absolute; left:50%; top:0; width:1px; height:100%; background:var(--amber); transform:translateX(-50%); }
 
-  #help{ position:absolute; right:26px; bottom:26px; text-align:right; font-size:10px; line-height:1.9; color:#7d858b; letter-spacing:.12em; text-transform:uppercase; }
+  #help{ position:absolute; right:26px; bottom:26px; text-align:right; font-size:10px; line-height:1.9; color:#7d858b; letter-spacing:.12em; text-transform:uppercase; pointer-events:auto; }
   #help b{ color:#cfd6d9; font-weight:600; }
+  #shopLink{ color:var(--amber); cursor:pointer; text-decoration:underline; }
 
   #msg{
     position:absolute; left:50%; bottom:14%; transform:translateX(-50%);
@@ -133,6 +134,45 @@
   #deploy:hover{ background:rgba(255,181,69,.12); box-shadow:0 0 26px rgba(255,181,69,.22); }
   .keys{ display:grid; grid-template-columns:auto auto; gap:4px 26px; font-size:10px; color:#8a9299; letter-spacing:.16em; margin-top:4px; }
   .keys b{ color:#cfd6d9; text-align:right; }
+
+  /* ---------- Shop Modal ---------- */
+  #shopModal{
+    position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 45%, rgba(10,14,16,.85), rgba(4,6,7,.96));
+    backdrop-filter: blur(4px);
+    pointer-events:auto;
+  }
+  .shop-content{
+    width:min(520px, 90vw);
+    background:linear-gradient(180deg, rgba(16,22,26,.95), rgba(10,14,16,.95));
+    border:1px solid rgba(255,181,69,.35);
+    padding:28px;
+    display:flex; flex-direction:column; gap:20px;
+    box-shadow:0 0 40px rgba(0,0,0,.8);
+  }
+  .shop-content h2{ font-size:20px; letter-spacing:.3em; color:var(--amber); font-weight:500; text-transform:uppercase; text-align:center; }
+  .shop-content p{ font-size:11px; letter-spacing:.18em; color:#8a9299; text-align:center; text-transform:uppercase; margin-top:-10px; }
+  .shop-items{ display:flex; flex-direction:column; gap:12px; }
+  .shop-item{
+    display:flex; justify-content:space-between; align-items:center;
+    background:rgba(255,255,255,.03); border:1px solid rgba(255,181,69,.15);
+    padding:12px 16px; gap:16px;
+  }
+  .shop-item div strong{ display:block; font-size:12px; letter-spacing:.15em; color:#e8e2d4; text-transform:uppercase; }
+  .shop-item div span{ display:block; font-size:9px; letter-spacing:.12em; color:#8a9299; margin-top:3px; text-transform:uppercase; }
+  .shop-item button{
+    padding:8px 16px; background:transparent; color:var(--amber); font-family:inherit;
+    border:1px solid var(--amber); letter-spacing:.2em; font-size:10px; text-transform:uppercase; cursor:pointer;
+    white-space:nowrap; transition:all .2s;
+  }
+  .shop-item button:hover{ background:rgba(255,181,69,.2); box-shadow:0 0 12px rgba(255,181,69,.3); }
+  #closeShopBtn{
+    margin-top:4px; padding:10px; background:transparent; color:#8a9299; font-family:inherit;
+    border:1px solid rgba(138,146,153,.3); letter-spacing:.25em; font-size:10px; text-transform:uppercase; cursor:pointer;
+    transition:all .2s;
+  }
+  #closeShopBtn:hover{ color:#e8e2d4; border-color:#e8e2d4; }
+
   .hidden{ display:none !important; }
 </style>
 <script type="importmap">
@@ -166,6 +206,7 @@
     <b>Wheel</b><span>Camera distance</span>
     <b>Shift</b><span>Boost</span>
     <b>M</b><span>Toggle map</span>
+    <b>B</b><span>Open Shop</span>
     <b>R</b><span>Right the tank</span>
   </div>
   <button id="deploy">Deploy</button>
@@ -174,11 +215,9 @@
 <div id="hud">
   <div id="compass"><div id="compassStrip"></div><div id="compassMark"></div></div>
 
-  <div id="scorePanel" class="panel" style="left: 26px; top: 26px; min-width: 168px;">
-    <div class="lbl">Score</div>
+  <div id="scorePanel" class="panel" style="left: 26px; top: 26px; min-width: 168px; pointer-events: auto;">
+    <div class="lbl">Score / Credits</div>
     <div id="scoreVal" style="font-size: 24px; color: var(--amber);">0</div>
-    </div>
-    <div id="hitNotification">
   </div>
 
   <div id="crosshair">
@@ -209,10 +248,42 @@
 
   <div id="help">
     <b>WASD</b> drive &nbsp; <b>SPACE</b> brake &nbsp; <b>SHIFT</b> boost<br/>
-    <b>MOUSE</b> aim &nbsp; <b>LMB</b> fire &nbsp; <b>M</b> map &nbsp; <b>R</b> right
+    <b>MOUSE</b> aim &nbsp; <b>LMB</b> fire &nbsp; <b>M</b> map &nbsp; <span id="shopLink" onclick="window.__game.toggleShop(true)"><b>B</b> shop</span> &nbsp; <b>R</b> right
   </div>
 
   <div id="msg"></div>
+</div>
+
+<!-- Shop Modal -->
+<div id="shopModal" class="hidden">
+  <div class="shop-content">
+    <h2>Quartermaster Shop</h2>
+    <p>Spend combat score on ammunition, repairs, and mountain climbing upgrades.</p>
+    <div class="shop-items">
+      <div class="shop-item">
+        <div>
+          <strong>Ammo Resupply (+100 Ammo)</strong>
+          <span>Restores and expands ammunition reserves</span>
+        </div>
+        <button onclick="window.__game.buyShopItem('ammo')">300 Score</button>
+      </div>
+      <div class="shop-item">
+        <div>
+          <strong>Armor &amp; Hull Repair (+100 HP)</strong>
+          <span>Patches armor plating and restores hull integrity</span>
+        </div>
+        <button onclick="window.__game.buyShopItem('health')">400 Score</button>
+      </div>
+      <div class="shop-item">
+        <div>
+          <strong>Mountain Climbing Kit</strong>
+          <span>Boosts engine power &amp; anti-roll physics to climb steep mountains without slipping or flipping</span>
+        </div>
+        <button onclick="window.__game.buyShopItem('climb')">1000 Score</button>
+      </div>
+    </div>
+    <button id="closeShopBtn" onclick="window.__game.toggleShop(false)">Close Shop [B / ESC]</button>
+  </div>
 </div>
 
 <script type="module" src="./src/main.js"></script>
