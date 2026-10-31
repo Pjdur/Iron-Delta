@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>STEEL &amp; MUD — Armored Assault</title>
+<style>
+  :root{
+    --amber:#ffb545;
+    --ok:#8fd18a;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ width:100%; height:100%; overflow:hidden; background:#0a0c0d; }
+  body{
+    font-family: "Consolas", "SF Mono", ui-monospace, monospace;
+    color:#e8e2d4;
+    user-select:none; -webkit-user-select:none;
+  }
+  #app{ display:block; width:100%; height:100%; }
+
+  /* ---------- Loading ---------- */
+  #loading{
+    position:fixed; inset:0; z-index:50;
+    background: radial-gradient(circle at 50% 40%, #1b2024 0%, #07090a 75%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:18px; letter-spacing:.18em; text-transform:uppercase;
+  }
+  #loading h1{ font-size:34px; letter-spacing:.42em; color:#d9d2c0; font-weight:500; }
+  #loading h1 span{ color:var(--amber); }
+  #barWrap{ width:min(420px,70vw); height:3px; background:#22262a; overflow:hidden; }
+  #bar{ width:0%; height:100%; background:linear-gradient(90deg,#5b4416,var(--amber)); transition:width .12s linear; }
+  #loadTxt{ font-size:11px; color:#7d858b; letter-spacing:.25em; }
+  #tip{ position:absolute; bottom:6vh; font-size:11px; color:#5f676c; letter-spacing:.2em; text-align:center; line-height:2; }
+
+  /* ---------- HUD ---------- */
+  #hud{ position:fixed; inset:0; z-index:20; pointer-events:none; opacity:0; transition:opacity .6s ease; }
+  #hud.on{ opacity:1; }
+
+  #crosshair{ position:absolute; left:50%; top:50%; width:64px; height:64px; transform:translate(-50%,-50%); }
+  #crosshair .ring{
+    position:absolute; inset:0; border:1px solid rgba(255,181,69,.55);
+    border-radius:50%; box-shadow:0 0 12px rgba(255,181,69,.25) inset;
+  }
+  #crosshair .dot{ position:absolute; left:50%; top:50%; width:3px; height:3px; margin:-1.5px 0 0 -1.5px; background:var(--amber); border-radius:50%; }
+  #crosshair .tick{ position:absolute; background:rgba(255,181,69,.8); }
+  #crosshair .tick.t{ left:50%; top:-12px; width:1px; height:12px; }
+  #crosshair .tick.b{ left:50%; bottom:-12px; width:1px; height:12px; }
+  #crosshair .tick.l{ top:50%; left:-12px; height:1px; width:12px; }
+  #crosshair .tick.r{ top:50%; right:-12px; height:1px; width:12px; }
+  #crosshair.reloading .ring{ border-color:rgba(255,90,77,.65); }
+
+  #range{ position:absolute; left:50%; top:calc(50% + 52px); transform:translateX(-50%); font-size:11px; letter-spacing:.18em; color:rgba(255,181,69,.75); }
+
+  .panel{
+    position:absolute;
+    background:linear-gradient(180deg, rgba(12,16,18,.78), rgba(12,16,18,.55));
+    border:1px solid rgba(255,181,69,.22);
+    padding:9px 13px;
+    backdrop-filter: blur(3px);
+  }
+  .lbl{ font-size:9px; letter-spacing:.28em; color:#8a9299; text-transform:uppercase; }
+
+  #stats{ left:26px; bottom:26px; min-width:196px; }
+  #speedRow{ display:flex; align-items:baseline; gap:7px; margin-top:2px; }
+  #speedVal{ font-size:34px; line-height:1; color:var(--amber); letter-spacing:.02em; }
+  #speedRow em{ font-style:normal; font-size:10px; color:#8a9299; letter-spacing:.2em; }
+  #gear{ font-size:10px; color:#8a9299; letter-spacing:.2em; margin-left:auto; }
+  #healthWrap{ margin-top:10px; }
+  #healthBar{ height:4px; background:#242a2d; margin-top:5px; overflow:hidden; }
+  #healthFill{ height:100%; width:100%; background:linear-gradient(90deg,#5f8a4e,var(--ok)); transition:width .25s; }
+
+  #ammoPanel{ left:26px; bottom:150px; min-width:196px; }
+  #ammoRow{ display:flex; align-items:baseline; gap:6px; margin-top:3px; }
+  #ammoVal{ font-size:26px; color:var(--amber); line-height:1; }
+  #ammoTot{ font-size:10px; color:#8a9299; letter-spacing:.15em; }
+  #reloadBar{ height:3px; background:#242a2d; margin-top:8px; overflow:hidden; }
+  #reloadFill{ height:100%; width:100%; background:var(--amber); transition:width .08s linear; }
+
+  #mapPanel{ right:26px; top:26px; padding:8px; }
+  #mapCanvas{ display:block; width:180px; height:180px; }
+  #mapMeta{ display:flex; justify-content:space-between; margin-top:6px; font-size:9px; color:#8a9299; letter-spacing:.16em; }
+
+  #compass{
+    position:absolute; left:50%; top:22px; transform:translateX(-50%);
+    width:340px; height:26px; overflow:hidden;
+    background:linear-gradient(90deg, rgba(10,14,16,0), rgba(10,14,16,.75) 20%, rgba(10,14,16,.75) 80%, rgba(10,14,16,0));
+    border-top:1px solid rgba(255,181,69,.18);
+    border-bottom:1px solid rgba(255,181,69,.18);
+  }
+  #compassStrip{ position:absolute; top:0; left:0; height:100%; white-space:nowrap; font-size:11px; color:#cdd3d6; }
+  #compassStrip span{ display:inline-block; width:34px; text-align:center; line-height:24px; letter-spacing:.1em; }
+  #compassStrip span.card{ color:var(--amber); font-weight:700; }
+  #compassMark{ position:absolute; left:50%; top:0; width:1px; height:100%; background:var(--amber); transform:translateX(-50%); }
+
+  #help{ position:absolute; right:26px; bottom:26px; text-align:right; font-size:10px; line-height:1.9; color:#7d858b; letter-spacing:.12em; text-transform:uppercase; }
+  #help b{ color:#cfd6d9; font-weight:600; }
+
+  #msg{
+    position:absolute; left:50%; bottom:14%; transform:translateX(-50%);
+    font-size:12px; letter-spacing:.3em; text-transform:uppercase; color:var(--amber);
+    opacity:0; transition:opacity .5s; text-shadow:0 0 14px rgba(0,0,0,.9);
+  }
+  #msg.on{ opacity:.95; }
+
+  #start{
+    position:fixed; inset:0; z-index:40; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:22px; text-align:center;
+    background:radial-gradient(circle at 50% 45%, rgba(10,14,16,.72), rgba(4,6,7,.93));
+    backdrop-filter: blur(2px);
+  }
+  #start h2{ font-size:30px; letter-spacing:.4em; font-weight:400; color:#e8e2d4; }
+  #start h2 span{ color:var(--amber); }
+  #start p{ font-size:11px; letter-spacing:.22em; color:#8a9299; line-height:2.1; text-transform:uppercase; }
+  #deploy{
+    margin-top:6px; padding:14px 44px; cursor:pointer;
+    background:transparent; color:var(--amber); font-family:inherit;
+    border:1px solid var(--amber); letter-spacing:.36em; font-size:12px;
+    text-transform:uppercase; transition:all .2s;
+  }
+  #deploy:hover{ background:rgba(255,181,69,.12); box-shadow:0 0 26px rgba(255,181,69,.22); }
+  .keys{ display:grid; grid-template-columns:auto auto; gap:4px 26px; font-size:10px; color:#8a9299; letter-spacing:.16em; margin-top:4px; }
+  .keys b{ color:#cfd6d9; text-align:right; }
+  .hidden{ display:none !important; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="app"></canvas>
+
+<div id="loading">
+  <h1>STEEL <span>&amp;</span> MUD</h1>
+  <div id="barWrap"><div id="bar"></div></div>
+  <div id="loadTxt">Initialising</div>
+  <div id="tip">Generating 4.8 &times; 4.8 km of terrain<br/>Planting forests &middot; seeding grass &middot; fuelling the engines</div>
+</div>
+
+<div id="start" class="hidden">
+  <h2>STEEL <span>&amp;</span> MUD</h2>
+  <p>Armored Assault &mdash; Sector 7</p>
+  <div class="keys">
+    <b>W / S</b><span>Throttle &amp; reverse</span>
+    <b>A / D</b><span>Steer tracks</span>
+    <b>Space</b><span>Brake</span>
+    <b>Mouse</b><span>Aim turret</span>
+    <b>Left click</b><span>Fire main gun</span>
+    <b>Wheel</b><span>Camera distance</span>
+    <b>Shift</b><span>Boost</span>
+    <b>R</b><span>Right the tank</span>
+  </div>
+  <button id="deploy">Deploy</button>
+</div>
+
+<div id="hud">
+  <div id="compass"><div id="compassStrip"></div><div id="compassMark"></div></div>
+
+  <div id="crosshair">
+    <div class="ring"></div><div class="dot"></div>
+    <div class="tick t"></div><div class="tick b"></div><div class="tick l"></div><div class="tick r"></div>
+  </div>
+  <div id="range">--- m</div>
+
+  <div id="ammoPanel" class="panel">
+    <div class="lbl">Main gun &mdash; 122 mm</div>
+    <div id="ammoRow"><span id="ammoVal">40</span><span id="ammoTot">/ 40</span></div>
+    <div id="reloadBar"><div id="reloadFill"></div></div>
+  </div>
+
+  <div id="stats" class="panel">
+    <div class="lbl">Ground speed</div>
+    <div id="speedRow"><span id="speedVal">0</span><em>km/h</em><span id="gear">N</span></div>
+    <div id="healthWrap">
+      <div class="lbl" style="font-size:8px">Hull integrity</div>
+      <div id="healthBar"><div id="healthFill"></div></div>
+    </div>
+  </div>
+
+  <div id="mapPanel" class="panel">
+    <canvas id="mapCanvas" width="180" height="180"></canvas>
+    <div id="mapMeta"><span>SECTOR 7</span><span id="gridRef">--</span></div>
+  </div>
+
+  <div id="help">
+    <b>WASD</b> drive &nbsp; <b>SPACE</b> brake &nbsp; <b>SHIFT</b> boost<br/>
+    <b>MOUSE</b> aim &nbsp; <b>LMB</b> fire &nbsp; <b>R</b> right
+  </div>
+
+  <div id="msg"></div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
