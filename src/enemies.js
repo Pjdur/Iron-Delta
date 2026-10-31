@@ -246,12 +246,12 @@ export class EnemyTank {
 
     // ---- gunnery ---------------------------------------------------------
     this.reload -= dt;
-    const aligned = Math.abs(turretErr) < 0.36;
+    const aligned = Math.abs(turretErr) < 0.26;
     if (
       this.player.alive && dist < this.fireRange && dist > 28 &&
       aligned && this.reload <= 0 && this._hasLineOfSight()
     ) {
-      if (Math.random() < 0.32) {
+      if (Math.random() < 0.1) {
         // dumb crew: they lose their nerve and hesitate
         this.reload = 2 + Math.random() * 2.5;
       } else {
@@ -294,7 +294,7 @@ export class EnemyTank {
     // simple lead + ballistic compensation (poorly estimated — these crews
     // are not marksmen, so they under-lead a moving target)
     const aim = _v2.copy(p)
-      .addScaledVector(this.player.vel, tof * 0.12);
+      .addScaledVector(this.player.vel, tof * 0.35);
     aim.y += 0.5 * 12.5 * tof * tof;
 
     const dir = aim.sub(muzzle).normalize();

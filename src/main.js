@@ -589,7 +589,7 @@ function updateHud(dt, aimDist) {
   el.ammo.textContent = tank.ammo;
   el.ammoTot.textContent = `/ ${tank.maxAmmo}`;
   el.reload.style.width = `${(1 - tank.reload / tank.reloadTime) * 100}%`;
-  el.health.style.width = `${tank.health}%`;
+  el.health.style.width = `${tank.health/5}%`;
   el.range.textContent = `${Math.round(aimDist)} m`;
 
   el.crosshair.classList.toggle('reloading', tank.reload > 0);

@@ -78,9 +78,9 @@ export class Tank {
     this.aimPoint = new THREE.Vector3(0, 0, -400);
     this.reload = 0;
     this.reloadTime = 0.1;
-    this.ammo = 1000;
-    this.maxAmmo = 1000;
-    this.health = 1000;
+    this.ammo = 500;
+    this.maxAmmo = 500;
+    this.health = 500;
 
     this.treadPrev = [null, null];
     this.travel = 0;
