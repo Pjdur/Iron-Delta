@@ -77,10 +77,10 @@ export class Tank {
     this.gunPitch = 0;
     this.aimPoint = new THREE.Vector3(0, 0, -400);
     this.reload = 0;
-    this.reloadTime = 1.55;
-    this.ammo = 40;
-    this.maxAmmo = 40;
-    this.health = 100;
+    this.reloadTime = 0.1;
+    this.ammo = 1000;
+    this.maxAmmo = 1000;
+    this.health = 1000;
 
     this.treadPrev = [null, null];
     this.travel = 0;
@@ -244,10 +244,19 @@ export class Tank {
 
   // --------------------------------------------------------------- physics
   step(dt, input, tracks) {
-    this.throttle = input.throttle;
-    this.steer = input.steer;
-    this.braking = input.brake;
-    this.boost = input.boost;
+    // A wrecked hull cannot drive: kill the engine inputs and lock the brakes.
+    if (!this.alive) {
+      this.throttle = 0;
+      this.steer = 0;
+      this.braking = true;
+      this.boost = false;
+      this._burnFx(dt);
+    } else {
+      this.throttle = input.throttle;
+      this.steer = input.steer;
+      this.braking = input.brake;
+      this.boost = input.boost;
+    }
 
     const SUB = 4;
     const h = dt / SUB;
@@ -509,7 +518,7 @@ export class Tank {
   }
 
   canFire() {
-    return this.reload <= 0 && this.ammo > 0;
+    return this.alive && this.reload <= 0 && this.ammo > 0;
   }
 
   fire() {
@@ -542,6 +551,34 @@ export class Tank {
 
   updateReload(dt) {
     if (this.reload > 0) this.reload = Math.max(0, this.reload - dt);
+  }
+
+  get alive() {
+    return this.health > 0;
+  }
+
+  takeDamage(amount) {
+    if (this.health <= 0) return;
+    this.health = Math.max(0, this.health - amount);
+    if (this.effects) {
+      this.effects.shake = Math.min(1.4, (this.effects.shake || 0) + 0.45);
+    }
+    if (this.health <= 0) {
+      this.burning = true;
+      this.burnPower = 1;
+      this.ammo = 0;
+    }
+  }
+
+  // Fire + rolling black smoke pouring off the engine deck of a burning wreck.
+  _burnFx(dt) {
+    if (!this.burning || !this.effects) return;
+    this._burnAccum = (this._burnAccum || 0) + dt;
+    if (this._burnAccum < 0.045) return;
+    this._burnAccum = 0;
+    _v1.set(0, 0.95, 0.25).applyQuaternion(this.quat).add(this.pos);
+    this.effects.burn(_v1, this.burnPower || 1);
+    this.burnPower = Math.max(0.45, (this.burnPower || 1) - dt * 0.01);
   }
 
   rightSelf() {

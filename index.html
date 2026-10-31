@@ -16,7 +16,12 @@
     color:#e8e2d4;
     user-select:none; -webkit-user-select:none;
   }
-  #app{ display:block; width:100%; height:100%; }
+  #app{ display:block; width:100%; height:100%; cursor:none; }
+
+  /* destroyed player tank */
+  #hud.wrecked #crosshair{ opacity:.22; }
+  #hud.wrecked #crosshair .ring{ border-color:rgba(255,90,77,.85); }
+  #hud.wrecked #msg{ color:#ff5a4d; }
 
   /* ---------- Loading ---------- */
   #loading{
@@ -48,7 +53,15 @@
   #crosshair .tick.l{ top:50%; left:-12px; height:1px; width:12px; }
   #crosshair .tick.r{ top:50%; right:-12px; height:1px; width:12px; }
   #crosshair.reloading .ring{ border-color:rgba(255,90,77,.65); }
-
+  /* reticle is over an enemy tank — turns green so you know the shot is on */
+  #crosshair.onTarget .ring{
+    border-color:rgba(110,255,138,.95);
+    box-shadow:0 0 22px rgba(110,255,138,.55) inset, 0 0 16px rgba(110,255,138,.45);
+    transform:scale(1.18);
+  }
+  #crosshair.onTarget .tick{ background:#6eff8a; }
+  #crosshair.onTarget .dot{ background:#6eff8a; box-shadow:0 0 10px #6eff8a; }
+  #crosshair.onTarget + #range{ color:#6eff8a; font-weight:700; }
   #range{ position:absolute; left:50%; top:calc(50% + 52px); transform:translateX(-50%); font-size:11px; letter-spacing:.18em; color:rgba(255,181,69,.75); }
 
   .panel{
@@ -152,6 +165,7 @@
     <b>Left click</b><span>Fire main gun</span>
     <b>Wheel</b><span>Camera distance</span>
     <b>Shift</b><span>Boost</span>
+    <b>M</b><span>Toggle map</span>
     <b>R</b><span>Right the tank</span>
   </div>
   <button id="deploy">Deploy</button>
@@ -159,6 +173,13 @@
 
 <div id="hud">
   <div id="compass"><div id="compassStrip"></div><div id="compassMark"></div></div>
+
+  <div id="scorePanel" class="panel" style="left: 26px; top: 26px; min-width: 168px;">
+    <div class="lbl">Score</div>
+    <div id="scoreVal" style="font-size: 24px; color: var(--amber);">0</div>
+    </div>
+    <div id="hitNotification">
+  </div>
 
   <div id="crosshair">
     <div class="ring"></div><div class="dot"></div>
@@ -181,14 +202,14 @@
     </div>
   </div>
 
-  <div id="mapPanel" class="panel">
+  <div id="mapPanel" class="panel hidden">
     <canvas id="mapCanvas" width="180" height="180"></canvas>
     <div id="mapMeta"><span>SECTOR 7</span><span id="gridRef">--</span></div>
   </div>
 
   <div id="help">
     <b>WASD</b> drive &nbsp; <b>SPACE</b> brake &nbsp; <b>SHIFT</b> boost<br/>
-    <b>MOUSE</b> aim &nbsp; <b>LMB</b> fire &nbsp; <b>R</b> right
+    <b>MOUSE</b> aim &nbsp; <b>LMB</b> fire &nbsp; <b>M</b> map &nbsp; <b>R</b> right
   </div>
 
   <div id="msg"></div>

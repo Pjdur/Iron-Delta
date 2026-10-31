@@ -1,19 +1,19 @@
-import * as THREE from 'three';
-import { heightAt } from './terrain.js';
+import * as THREE from "three";
+import { heightAt } from "./terrain.js";
 
 // ---------------------------------------------------------------------------
 // Soft round sprite for all particles
 // ---------------------------------------------------------------------------
 function makeSprite() {
   const S = 64;
-  const cv = document.createElement('canvas');
+  const cv = document.createElement("canvas");
   cv.width = cv.height = S;
-  const ctx = cv.getContext('2d');
+  const ctx = cv.getContext("2d");
   const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  g.addColorStop(0.0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.35, 'rgba(255,255,255,0.75)');
-  g.addColorStop(0.75, 'rgba(255,255,255,0.16)');
-  g.addColorStop(1.0, 'rgba(255,255,255,0)');
+  g.addColorStop(0.0, "rgba(255,255,255,1)");
+  g.addColorStop(0.35, "rgba(255,255,255,0.75)");
+  g.addColorStop(0.75, "rgba(255,255,255,0.16)");
+  g.addColorStop(1.0, "rgba(255,255,255,0)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, S, S);
   const tex = new THREE.CanvasTexture(cv);
@@ -55,10 +55,10 @@ class ParticlePool {
     }
 
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    geo.setAttribute('aColor', new THREE.BufferAttribute(this.col, 3));
-    geo.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1));
-    geo.setAttribute('aAlpha', new THREE.BufferAttribute(this.alpha, 1));
+    geo.setAttribute("position", new THREE.BufferAttribute(this.pos, 3));
+    geo.setAttribute("aColor", new THREE.BufferAttribute(this.col, 3));
+    geo.setAttribute("aSize", new THREE.BufferAttribute(this.size, 1));
+    geo.setAttribute("aAlpha", new THREE.BufferAttribute(this.alpha, 1));
 
     const mat = new THREE.ShaderMaterial({
       uniforms: { uTex: { value: spriteTexture() } },
@@ -101,9 +101,15 @@ class ParticlePool {
   emit(x, y, z, vx, vy, vz, r, g, b, size, life, grav, drag, grow = 0) {
     const i = this.cursor;
     this.cursor = (this.cursor + 1) % this.cap;
-    this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z;
-    this.vel[i * 3] = vx; this.vel[i * 3 + 1] = vy; this.vel[i * 3 + 2] = vz;
-    this.col[i * 3] = r; this.col[i * 3 + 1] = g; this.col[i * 3 + 2] = b;
+    this.pos[i * 3] = x;
+    this.pos[i * 3 + 1] = y;
+    this.pos[i * 3 + 2] = z;
+    this.vel[i * 3] = vx;
+    this.vel[i * 3 + 1] = vy;
+    this.vel[i * 3 + 2] = vz;
+    this.col[i * 3] = r;
+    this.col[i * 3 + 1] = g;
+    this.col[i * 3 + 2] = b;
     this.size0[i] = size;
     this.size[i] = size;
     this.grow[i] = grow;
@@ -197,7 +203,10 @@ export class Effects {
     s.mesh.visible = true;
     s.mesh.position.copy(pos);
     // shell geometry is aligned along +Z
-    s.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    s.mesh.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      dir.clone().normalize(),
+    );
     return s;
   }
 
@@ -210,14 +219,20 @@ export class Effects {
       const ph = Math.random() * Math.PI;
       const sp = 6 + Math.random() * 26 * s;
       this.fire.emit(
-        p.x, p.y, p.z,
+        p.x,
+        p.y,
+        p.z,
         Math.cos(th) * Math.sin(ph) * sp,
         Math.abs(Math.cos(ph)) * sp * 0.9 + 3,
         Math.sin(th) * Math.sin(ph) * sp,
-        1.0, 0.62 + Math.random() * 0.3, 0.16,
+        1.0,
+        0.62 + Math.random() * 0.3,
+        0.16,
         (1.4 + Math.random() * 2.6) * s,
         0.35 + Math.random() * 0.55,
-        -6, 2.4, 0.9
+        -6,
+        2.4,
+        0.9,
       );
     }
     // sparks
@@ -225,12 +240,20 @@ export class Effects {
       const th = Math.random() * Math.PI * 2;
       const sp = 14 + Math.random() * 45 * s;
       this.fire.emit(
-        p.x, p.y + 0.4, p.z,
-        Math.cos(th) * sp, 4 + Math.random() * 26 * s, Math.sin(th) * sp,
-        1.0, 0.85, 0.45,
+        p.x,
+        p.y + 0.4,
+        p.z,
+        Math.cos(th) * sp,
+        4 + Math.random() * 26 * s,
+        Math.sin(th) * sp,
+        1.0,
+        0.85,
+        0.45,
         0.35 + Math.random() * 0.5,
         0.5 + Math.random() * 0.7,
-        -22, 0.7, 0
+        -22,
+        0.7,
+        0,
       );
     }
     // smoke
@@ -239,12 +262,20 @@ export class Effects {
       const sp = 2 + Math.random() * 11 * s;
       const g = 0.18 + Math.random() * 0.2;
       this.smoke.emit(
-        p.x + (Math.random() - 0.5) * 2, p.y + Math.random() * 1.5, p.z + (Math.random() - 0.5) * 2,
-        Math.cos(th) * sp, 2 + Math.random() * 7, Math.sin(th) * sp,
-        g, g * 0.96, g * 0.9,
+        p.x + (Math.random() - 0.5) * 2,
+        p.y + Math.random() * 1.5,
+        p.z + (Math.random() - 0.5) * 2,
+        Math.cos(th) * sp,
+        2 + Math.random() * 7,
+        Math.sin(th) * sp,
+        g,
+        g * 0.96,
+        g * 0.9,
         (2.6 + Math.random() * 4.5) * s,
         1.5 + Math.random() * 1.8,
-        1.1, 1.1, 1.6
+        1.1,
+        1.1,
+        1.6,
       );
     }
     // mud & debris kicked up
@@ -252,12 +283,20 @@ export class Effects {
       const th = Math.random() * Math.PI * 2;
       const sp = 5 + Math.random() * 22 * s;
       this.smoke.emit(
-        p.x, p.y + 0.3, p.z,
-        Math.cos(th) * sp, 8 + Math.random() * 20 * s, Math.sin(th) * sp,
-        0.20, 0.15, 0.10,
+        p.x,
+        p.y + 0.3,
+        p.z,
+        Math.cos(th) * sp,
+        8 + Math.random() * 20 * s,
+        Math.sin(th) * sp,
+        0.2,
+        0.15,
+        0.1,
         0.5 + Math.random() * 0.9,
         0.8 + Math.random() * 1.1,
-        -20, 0.6, 0
+        -20,
+        0.6,
+        0,
       );
     }
 
@@ -274,27 +313,39 @@ export class Effects {
   muzzle(pos, dir) {
     for (let i = 0; i < 12; i++) {
       this.fire.emit(
-        pos.x, pos.y, pos.z,
+        pos.x,
+        pos.y,
+        pos.z,
         dir.x * (18 + Math.random() * 26) + (Math.random() - 0.5) * 8,
         dir.y * 20 + (Math.random() - 0.5) * 8,
         dir.z * (18 + Math.random() * 26) + (Math.random() - 0.5) * 8,
-        1.0, 0.75, 0.35,
+        1.0,
+        0.75,
+        0.35,
         1.4 + Math.random() * 2.2,
         0.16 + Math.random() * 0.18,
-        0, 3.5, 1.2
+        0,
+        3.5,
+        1.2,
       );
     }
     for (let i = 0; i < 10; i++) {
       const g = 0.42 + Math.random() * 0.2;
       this.smoke.emit(
-        pos.x, pos.y, pos.z,
+        pos.x,
+        pos.y,
+        pos.z,
         dir.x * (4 + Math.random() * 10) + (Math.random() - 0.5) * 5,
         dir.y * 5 + Math.random() * 3,
         dir.z * (4 + Math.random() * 10) + (Math.random() - 0.5) * 5,
-        g, g, g * 0.95,
+        g,
+        g,
+        g * 0.95,
         1.6 + Math.random() * 2.0,
         0.7 + Math.random() * 0.7,
-        1.2, 2.2, 2.4
+        1.2,
+        2.2,
+        2.4,
       );
     }
     this.flash.position.copy(pos).addScaledVector(dir, 2);
@@ -315,10 +366,14 @@ export class Effects {
         -vel.x * 0.18 + (Math.random() - 0.5) * 3,
         1.2 + Math.random() * 2.4,
         -vel.z * 0.18 + (Math.random() - 0.5) * 3,
-        g, g * 0.94, g * 0.82,
+        g,
+        g * 0.94,
+        g * 0.82,
         1.2 + Math.random() * 2.2,
         0.8 + Math.random() * 1.0,
-        1.4, 1.6, 2.2
+        1.4,
+        1.6,
+        2.2,
       );
     }
   }
@@ -326,14 +381,59 @@ export class Effects {
   muzzleSmall(pos, dir) {
     for (let i = 0; i < 4; i++) {
       this.fire.emit(
-        pos.x, pos.y, pos.z,
+        pos.x,
+        pos.y,
+        pos.z,
         dir.x * 20 + (Math.random() - 0.5) * 4,
         dir.y * 20 + (Math.random() - 0.5) * 4,
         dir.z * 20 + (Math.random() - 0.5) * 4,
-        1.0, 0.78, 0.4,
+        1.0,
+        0.78,
+        0.4,
         0.5 + Math.random() * 0.4,
         0.07 + Math.random() * 0.05,
-        0, 4, 0
+        0,
+        4,
+        0,
+      );
+    }
+  }
+
+  // Burning wreck: flames licking out of the engine deck plus heavy black smoke.
+  burn(pos, power = 1) {
+    for (let i = 0; i < 2; i++) {
+      this.fire.emit(
+        pos.x + (Math.random() - 0.5) * 2.3,
+        pos.y + Math.random() * 0.7,
+        pos.z + (Math.random() - 0.5) * 2.3,
+        (Math.random() - 0.5) * 2.4,
+        (2.8 + Math.random() * 3.6) * power,
+        (Math.random() - 0.5) * 2.4,
+        1.0,
+        0.5 + Math.random() * 0.28,
+        0.1,
+        (1.4 + Math.random() * 1.6) * power,
+        0.4 + Math.random() * 0.5,
+        -1.4,
+        1.2,
+        2.4,
+      );
+    }
+    if (Math.random() < 0.8) {
+      const g = 0.12 + Math.random() * 0.09;
+      this.smoke.emit(
+        pos.x + (Math.random() - 0.5) * 2.1,
+        pos.y + 1.5,
+        pos.z + (Math.random() - 0.5) * 2.1,
+        (Math.random() - 0.5) * 1.7,
+        3.2 + Math.random() * 2.8,
+        (Math.random() - 0.5) * 1.7,
+        g, g, g * 1.05,
+        2.4 + Math.random() * 2.2,
+        2.0 + Math.random() * 1.8,
+        -0.6,
+        0.5,
+        3.2,
       );
     }
   }
@@ -353,20 +453,42 @@ export class Effects {
     }
 
     // shells
+    // Inside Effects update(dt) loop for shells:
     for (const s of this.shells) {
       if (!s.alive) continue;
       s.life -= dt;
       s.vel.y -= 12.5 * dt;
       s.pos.addScaledVector(s.vel, dt);
       s.mesh.position.copy(s.pos);
-      s.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), s.vel.clone().normalize());
+      s.mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1),
+        s.vel.clone().normalize(),
+      );
 
       const ground = heightAt(s.pos.x, s.pos.z);
-      if (s.pos.y <= ground || s.life <= 0) {
+
+      // Check collision with enemy armor (swept segment test)
+      let targetHit = false;
+      if (!s.prev) s.prev = new THREE.Vector3();
+      s.prev.copy(s.pos).addScaledVector(s.vel, -dt);
+      const game = window.__game;
+      if (game && game.hitTest) {
+        const res = game.hitTest(s.prev, s.pos);
+        if (res) targetHit = true;
+      }
+
+      if (s.pos.y <= ground || s.life <= 0 || targetHit) {
         s.alive = false;
         s.mesh.visible = false;
-        if (s.pos.y <= ground) {
-          this.explosion(new THREE.Vector3(s.pos.x, ground + 0.5, s.pos.z), 1.15);
+        if (s.pos.y <= ground || targetHit) {
+          this.explosion(
+            new THREE.Vector3(
+              s.pos.x,
+              Math.max(s.pos.y, ground + 0.5),
+              s.pos.z,
+            ),
+            1.15,
+          );
         }
       }
     }

@@ -7,6 +7,7 @@ import { TrackSystem } from './tracks.js';
 import { Effects } from './effects.js';
 import { Tank } from './tank.js';
 import { Soldiers } from './soldiers.js';
+import { EnemyManager } from './enemies.js';
 import { clamp, wrapAngle } from './noise.js';
 
 // ---------------------------------------------------------------------------
@@ -121,19 +122,19 @@ water.receiveShadow = false;
 scene.add(water);
 
 // ---------------------------------------------------------------------------
-// World objects
+// World objects & Scoring
 // ---------------------------------------------------------------------------
 let terrain, vegetation, grass, tracks, footprints, effects, tank, soldiers;
+let enemies = [];
+let enemyMgr = null;
+let score = 0;
 let mapBase = null;
 
 const input = { throttle: 0, steer: 0, brake: false, boost: false };
-// yawOffset = free-look from the mouse, followYaw = smoothed hull heading.
-// The final camera yaw is the sum, so steering the hull swings the world
-// around the tank instead of spinning the tank on screen.
 const cam = { yawOffset: 0, followYaw: 0, pitch: 0.2, dist: 20 };
 
 // ---------------------------------------------------------------------------
-// Adaptive quality — this scene is heavy, so scale it to the hardware.
+// Adaptive quality
 // ---------------------------------------------------------------------------
 const QUALITY = [
   { name: 'low', grass: 8000, veg: 0.5, shadow: 1024, shadowEvery: 3, pixelRatio: 0.7, fineRadius: 480 },
@@ -164,6 +165,39 @@ function applyQuality(idx) {
 }
 
 // ---------------------------------------------------------------------------
+// Scoring & Hit Feedback
+// ---------------------------------------------------------------------------
+function addScore(pts, moduleName, isCrit) {
+  score += pts;
+  const scoreValEl = document.getElementById('scoreVal');
+  if (scoreValEl) scoreValEl.textContent = score;
+
+  const msg = isCrit 
+    ? `CRITICAL HIT: ${moduleName.toUpperCase()} +${pts}` 
+    : `HIT: ${moduleName.toUpperCase()} +${pts}`;
+  flashMessage(msg);
+}
+
+function spawnEnemies() {
+  enemyMgr = new EnemyManager(scene, effects, tank, 6);
+
+  enemyMgr.onHit = (res, killed) => {
+    addScore(killed ? res.points + 400 : res.points, res.module, killed || res.critical);
+  };
+  enemyMgr.onKill = () => {
+    flashMessage('ENEMY ARMOR DESTROYED');
+  };
+
+  enemies = enemyMgr.tanks;
+}
+
+// Player shell -> enemy tank sweep, used by the effects shell tracker.
+function hitTestEnemy(a, b) {
+  if (!enemyMgr) return null;
+  return enemyMgr.hitTest(a, b);
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 const barEl = document.getElementById('bar');
@@ -184,7 +218,6 @@ async function boot() {
   terrain = new Terrain(scene);
   await nextFrame();
 
-  // progressively build the high-detail chunks
   const totalFine = GRID * GRID;
   let guard = 0;
   while (terrain.remaining > 0 && guard < 500) {
@@ -203,13 +236,14 @@ async function boot() {
   await nextFrame();
   grass = new Grass(scene);
 
-  progress(0.80, 'Mustering infantry');
+  progress(0.80, 'Mustering infantry & armor');
   await nextFrame();
   effects = new Effects(scene);
   tracks = new TrackSystem(scene, { maxQuads: 6000, dark: 0.9 });
   footprints = new TrackSystem(scene, { maxQuads: 4000, dark: 0.5, footprint: true });
   tank = new Tank(scene, effects);
   soldiers = new Soldiers(scene, 70);
+  spawnEnemies();
 
   effects.onImpact = (p, radius) => {
     const k = soldiers.killNear(p, radius * 1.3);
@@ -226,9 +260,8 @@ async function boot() {
   await nextFrame();
 
   loadingEl.classList.add('hidden');
-  startEl.classList.remove('hidden');
+  if (!deployed) startEl.classList.remove('hidden');
 
-  // seat the camera before the first frame
   updateCamera(1, true);
 
   renderer.setAnimationLoop(loop);
@@ -282,9 +315,10 @@ const _mn = new THREE.Vector3();
 
 const mapCanvas = document.getElementById('mapCanvas');
 const mapCtx = mapCanvas.getContext('2d');
+let mapVisible = false;
 
 function drawMinimap() {
-  if (!mapBase) return;
+  if (!mapBase || !mapVisible) return;
   const S = 180;
   mapCtx.drawImage(mapBase, 0, 0);
 
@@ -293,7 +327,6 @@ function drawMinimap() {
     ((z + HALF) / WORLD_SIZE) * S,
   ];
 
-  // play area
   const [cx, cz] = toMap(0, 0);
   mapCtx.strokeStyle = 'rgba(255,181,69,0.30)';
   mapCtx.lineWidth = 1;
@@ -301,17 +334,14 @@ function drawMinimap() {
   mapCtx.arc(cx, cz, (PLAY_RADIUS / WORLD_SIZE) * S, 0, Math.PI * 2);
   mapCtx.stroke();
 
-  // infantry
-  for (const u of soldiers.units) {
-    if (u.dead) continue;
-    const [mx, mz] = toMap(u.x, u.z);
-    if (Math.hypot(u.x - tank.pos.x, u.z - tank.pos.z) < 260) {
-      mapCtx.fillStyle = 'rgba(255,90,77,0.85)';
-      mapCtx.fillRect(mx - 1, mz - 1, 2, 2);
-    }
+  // Enemy tanks on minimap
+  for (const e of enemies) {
+    if (e.dead) continue;
+    const [ex, ez] = toMap(e.pos.x, e.pos.z);
+    mapCtx.fillStyle = 'rgba(255,80,80,0.9)';
+    mapCtx.fillRect(ex - 2, ez - 2, 4, 4);
   }
 
-  // player
   const [px, pz] = toMap(tank.pos.x, tank.pos.z);
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(tank.quat);
   const a = Math.atan2(fwd.x, -fwd.z);
@@ -337,9 +367,6 @@ const _camDesired = new THREE.Vector3();
 const _camFwd = new THREE.Vector3();
 
 function updateCamera(dt, instant = false) {
-  // --- hull-heading follow -------------------------------------------------
-  // The camera orbits the hull, so the hull never appears to spin: the world
-  // sweeps past underneath instead.
   _camFwd.set(0, 0, -1).applyQuaternion(tank.quat);
   const hullYaw = Math.atan2(-_camFwd.x, -_camFwd.z);
 
@@ -350,7 +377,7 @@ function updateCamera(dt, instant = false) {
     cam.followYaw = wrapAngle(cam.followYaw + delta * (1 - Math.exp(-dt * 5.5)));
   }
 
-  const yaw = cam.followYaw + cam.yawOffset;
+  const yaw = cam.followYaw;
   const cp = Math.cos(cam.pitch);
   const sp = Math.sin(cam.pitch);
 
@@ -372,7 +399,7 @@ function updateCamera(dt, instant = false) {
 }
 
 // ---------------------------------------------------------------------------
-// Ground raycast (marches the analytic height field — very fast)
+// Ground raycast
 // ---------------------------------------------------------------------------
 const _rayDir = new THREE.Vector3();
 const _rayP = new THREE.Vector3();
@@ -407,12 +434,56 @@ function aimRay(out) {
 }
 
 // ---------------------------------------------------------------------------
+// Free-cursor aiming (no pointer lock). The view still follows the hull, but
+// the gun points wherever the cursor is — much easier to aim with.
+// ---------------------------------------------------------------------------
+const pointer = { x: 0, y: 0 };
+const _aimDir = new THREE.Vector3();
+const _aimP = new THREE.Vector3();
+
+function pointerAim(out) {
+  camera.updateMatrixWorld();
+  _aimDir.set(pointer.x, pointer.y, 0.5).unproject(camera).sub(camera.position).normalize();
+
+  const origin = camera.position;
+  const maxT = 2200;
+  let t = 8;
+  let step = 6;
+  while (t < maxT) {
+    _aimP.copy(origin).addScaledVector(_aimDir, t);
+    if (_aimP.y <= heightAt(_aimP.x, _aimP.z)) {
+      let lo = t - step;
+      let hi = t;
+      for (let i = 0; i < 12; i++) {
+        const m = (lo + hi) * 0.5;
+        _aimP.copy(origin).addScaledVector(_aimDir, m);
+        if (_aimP.y <= heightAt(_aimP.x, _aimP.z)) hi = m;
+        else lo = m;
+      }
+      out.copy(origin).addScaledVector(_aimDir, hi);
+      // Never aim at a point behind/inside the turret — that makes the gun
+      // spin around. Push short hits out to a sane engagement distance.
+      if (out.distanceTo(camera.position) < 48) {
+        out.copy(origin).addScaledVector(_aimDir, 48);
+      }
+      return out.distanceTo(tank.pos);
+    }
+    t += step;
+    step = Math.min(step * 1.14, 50);
+  }
+  out.copy(origin).addScaledVector(_aimDir, maxT);
+  return maxT;
+}
+
+// ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 const keys = new Set();
-let locked = false;
 let running = false;
+let deployed = false;
 let msgTimer = 0;
+let playerDead = false;
+let deadTimer = 0;
 
 function flashMessage(text) {
   const el = document.getElementById('msg');
@@ -427,6 +498,10 @@ window.addEventListener('keydown', (e) => {
     tank.rightSelf();
     flashMessage('Hull righted');
   }
+  if (e.code === 'KeyM') {
+    mapVisible = !mapVisible;
+    document.getElementById('mapPanel').classList.toggle('hidden', !mapVisible);
+  }
   if (e.code === 'Space') e.preventDefault();
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
@@ -435,27 +510,18 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) keys.
 
 canvas.addEventListener('mousedown', (e) => {
   if (!running) return;
-  if (!locked) {
-    canvas.requestPointerLock();
-    return;
-  }
   if (e.button === 0) tryFire();
 });
 document.getElementById('deploy').addEventListener('click', () => {
+  deployed = true;
   startEl.classList.add('hidden');
   hudEl.classList.add('on');
   running = true;
-  canvas.requestPointerLock();
 });
 
-document.addEventListener('pointerlockchange', () => {
-  locked = document.pointerLockElement === canvas;
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (!locked || !running) return;
-  cam.yawOffset = wrapAngle(cam.yawOffset - e.movementX * 0.0022);
-  cam.pitch = clamp(cam.pitch + e.movementY * 0.0018, -0.22, 1.15);
+window.addEventListener('mousemove', (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
 });
 
 window.addEventListener('wheel', (e) => {
@@ -533,7 +599,6 @@ function updateHud(dt, aimDist) {
     if (msgTimer <= 0) document.getElementById('msg').classList.remove('on');
   }
 
-  // compass
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(tank.quat);
   let heading = (-Math.atan2(fwd.x, -fwd.z) * 180) / Math.PI;
   heading = ((heading % 360) + 360) % 360;
@@ -545,12 +610,66 @@ function updateHud(dt, aimDist) {
   el.grid.textContent = `${String.fromCharCode(65 + gx)}${gz}`;
 }
 
+// Keep the reticle glued to the real cursor.
+function positionCrosshair() {
+  const px = (pointer.x * 0.5 + 0.5) * window.innerWidth;
+  const py = (-pointer.y * 0.5 + 0.5) * window.innerHeight;
+  el.crosshair.style.left = `${px}px`;
+  el.crosshair.style.top = `${py}px`;
+  el.range.style.left = `${px}px`;
+  el.range.style.top = `${py + 52}px`;
+  el.crosshair.classList.toggle('onTarget', targetLocked);
+  if (targetLocked) el.range.textContent = `TARGET ${Math.round(aimDist)} m`;
+}
+
+function onPlayerDeath() {
+  playerDead = true;
+  deadTimer = 0;
+  effects.explosion(tank.pos.clone().add(new THREE.Vector3(0, 1.4, 0)), 1.7);
+  flashMessage('VEHICLE DESTROYED — CREW BAILED OUT');
+  msgTimer = 9999;
+  hudEl.classList.add('wrecked');
+}
+
+// Screen-space pick: which live enemy hull is under the reticle? The pick box is
+// a little larger than the tank, which makes hitting them forgiving.
+const _pickV = new THREE.Vector3();
+
+function pickEnemyUnderCursor(groundDist) {
+  if (!enemyMgr) return null;
+  const tanHalf = Math.tan((camera.fov * Math.PI) / 360);
+  const aspect = camera.aspect || 1;
+  let best = null;
+  let bestScore = 1;
+
+  for (const e of enemyMgr.tanks) {
+    if (e.dead) continue;
+    _pickV.copy(e.pos);
+    _pickV.y += 1.1;
+    const d = _pickV.distanceTo(camera.position);
+    // out of range, or hidden behind the terrain the cursor is resting on
+    if (d > 900 || d > groundDist + 90) continue;
+    _pickV.project(camera);
+    if (_pickV.z > 1) continue;
+
+    const halfH = Math.max(0.001, d * tanHalf);
+    const rx = 2.6 / (halfH * aspect);
+    const ry = 2.1 / halfH;
+    const nx = (_pickV.x - pointer.x) / rx;
+    const ny = (_pickV.y - pointer.y) / ry;
+    const score = nx * nx + ny * ny;
+    if (score < bestScore) { bestScore = score; best = e; }
+  }
+  return best;
+}
+
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
 const aimPoint = new THREE.Vector3();
 let aimDist = 0;
+let targetLocked = false;
 let elapsed = 0;
 let frameCount = 0;
 let fpsAccum = 0;
@@ -578,27 +697,40 @@ function loop() {
     readInput();
     tank.step(dt, input, tracks);
     tank.updateReload(dt);
+    if (!tank.alive && !playerDead) onPlayerDeath();
   } else {
     tank.aimAt(tank.pos.clone().add(new THREE.Vector3(0, 0, -300)), dt);
   }
 
   updateCamera(dt);
 
-  // aim solution
-  aimDist = aimRay(aimPoint);
+  // update enemy tanks
+  if (enemyMgr) enemyMgr.update(dt);
+
+  aimDist = pointerAim(aimPoint);
+
+  // Reticle lock-on: is the cursor covering an enemy hull? If so the gun snaps
+  // onto it and the reticle turns green.
+  targetLocked = false;
+  if (enemyMgr && running) {
+    const groundDist = aimPoint.distanceTo(camera.position);
+    const target = pickEnemyUnderCursor(groundDist);
+    if (target) {
+      targetLocked = true;
+      aimPoint.copy(target.pos);
+      aimPoint.y += 1.15;
+      aimDist = aimPoint.distanceTo(tank.pos);
+    }
+  }
+
   tank.aimAt(aimPoint, dt);
 
-  // soldiers (footprints trail)
   soldiers.update(dt, tank.pos, camera, effects, elapsed);
-
-  // footsteps as they walk — cheap: sample a few soldiers near the tank
-  // (skipped for perf; tank tracks carry the visual weight)
 
   grass.update(tank.pos);
   terrain.update(camera.position);
   effects.update(dt, camera);
 
-  // sky + sun follow the player so shadows stay crisp
   sky.position.copy(camera.position);
   sun.position.copy(tank.pos).addScaledVector(SUN_DIR, 320);
   sun.target.position.copy(tank.pos);
@@ -611,6 +743,7 @@ function loop() {
   effects.applyShake(camera, elapsed);
 
   if (running) updateHud(dt, aimDist);
+  positionCrosshair();
   drawMinimap();
 
   renderer.render(scene, camera);
@@ -618,7 +751,7 @@ function loop() {
 }
 
 // ---------------------------------------------------------------------------
-// Events
+// Events & Debug Handles
 // ---------------------------------------------------------------------------
 window.addEventListener('resize', () => {
   applyQuality(qualityIdx);
@@ -631,16 +764,20 @@ document.addEventListener('contextmenu', (e) => e.preventDefault());
 buildCompass();
 boot();
 
-// expose a few handles for debugging in the console
 window.__game = {
   get tank() { return tank; },
   get scene() { return scene; },
   get camera() { return camera; },
   get soldiers() { return soldiers; },
+  get enemies() { return enemies; },
+  get enemyMgr() { return enemyMgr; },
+  hitTest: hitTestEnemy,
+  get score() { return score; },
   get grass() { return grass; },
   get terrain() { return terrain; },
   get sun() { return sun; },
   get hemi() { return hemi; },
+  addScore,
   cam,
   renderer,
   input,
