@@ -344,8 +344,16 @@ export class Tank {
     const avgNormal = new THREE.Vector3();
     let lateralSlip = 0;
 
-    const gripLimit = this.hasClimbingKit ? 220000 : 26000;
-    const gripMultiplier = this.hasClimbingKit ? 18000 : 3200;
+    const gripLimit = this.hasClimbingKit ? 350000 : 26000;
+    const gripMultiplier = this.hasClimbingKit ? 25000 : 3200;
+
+    // Sample center terrain normal for peak stability when climbing kit is active
+    const centerH = heightAt(this.pos.x, this.pos.z);
+    const centerNormal = normalAt(this.pos.x, this.pos.z, _n.clone());
+    if (this.hasClimbingKit) {
+      avgNormal.addScaledVector(centerNormal, 2.0);
+      contacts++;
+    }
 
     for (const wl of this.wheels) {
       const wp = wl.clone().applyQuaternion(this.quat).add(this.pos);
@@ -363,7 +371,7 @@ export class Tank {
 
       let springF = this.springK * comp - this.damp * upVel;
       if (springF < 0) springF = 0;
-      springF = Math.min(springF, this.mass * (this.hasClimbingKit ? 350 : 150));
+      springF = Math.min(springF, this.mass * (this.hasClimbingKit ? 400 : 150));
 
       const normal = normalAt(wp.x, wp.z, _n);
       avgNormal.add(normal);
@@ -401,9 +409,8 @@ export class Tank {
       const longV = pv.dot(fwdP);
       let rollCoeff = 900;
       if (this.hasClimbingKit) {
-        // High longitudinal traction when climbing / idling on slopes
-        if (Math.abs(this.throttle) < 0.05) rollCoeff = 12000;
-        else rollCoeff = 2500;
+        if (Math.abs(this.throttle) < 0.05) rollCoeff = 25000; // Zero slip on peak / steep slopes
+        else rollCoeff = 4000;
       }
       const roll = -longV * rollCoeff;
       const rf = fwdP.clone().multiplyScalar(roll * 0.25);
@@ -411,12 +418,11 @@ export class Tank {
       torque.add(r.clone().cross(rf));
     }
 
-    // ---- anti-slip track friction when stationary ----
-    if (contacts > 0 && Math.abs(this.throttle) < 0.01 && !this.braking) {
-      const planar = new THREE.Vector3(this.vel.x, 0, this.vel.z);
-      const pl = planar.length();
-      if (pl < (this.hasClimbingKit ? 8.0 : 3.0)) {
-        force.addScaledVector(planar, -this.mass * (this.hasClimbingKit ? 14.0 : 3.4));
+    // Anti-slip ground magnetic anchor when climbing kit is owned
+    if (this.hasClimbingKit && contacts > 0) {
+      const heightAboveGround = this.pos.y - centerH;
+      if (heightAboveGround < 1.6) {
+        force.addScaledVector(centerNormal, -Math.max(0, this.vel.dot(centerNormal)) * this.mass * 14);
       }
     }
 
@@ -432,31 +438,32 @@ export class Tank {
       const cur = this.angVel.dot(bodyYawAxis);
       this.angVel.addScaledVector(bodyYawAxis, (target - cur) * Math.min(1, dt * 7));
 
-      // righting torque: keep the hull aligned with the average contact normal
       avgNormal.normalize();
       const axis = up.clone().cross(avgNormal);
       const align = axis.length();
       if (align > 0.001) {
-        const alignStrength = this.hasClimbingKit ? 38.0 : 9.0;
+        const alignStrength = this.hasClimbingKit ? 65.0 : 9.0;
         const strength = Math.min(align, 1) * this.mass * alignStrength;
         torque.addScaledVector(axis.normalize(), strength);
       }
 
-      // Anti-flip feature: cancel out excessive pitching/rolling angular momentum
       const yawComp = this.angVel.dot(bodyYawAxis);
       const side = this.angVel.clone().addScaledVector(bodyYawAxis, -yawComp);
-      const dampRate = this.hasClimbingKit ? 22.0 : 5.0;
+      const dampRate = this.hasClimbingKit ? 38.0 : 5.0;
       this.angVel.addScaledVector(side, -Math.min(0.9, dt * dampRate));
 
-      // Direct anti-flip orientation alignment when kit is owned
+      // Absolute anti-flip and anti-180 lock for peak cresting
       if (this.hasClimbingKit) {
         const upDotNormal = up.dot(avgNormal);
-        if (upDotNormal < 0.999) {
+        if (upDotNormal < 0.99) {
           const correctionAxis = up.clone().cross(avgNormal).normalize();
           const angleDiff = Math.acos(clamp(upDotNormal, -1, 1));
-          const qFix = new THREE.Quaternion().setFromAxisAngle(correctionAxis, angleDiff * Math.min(1, dt * 18));
+          const qFix = new THREE.Quaternion().setFromAxisAngle(correctionAxis, angleDiff * Math.min(1, dt * 25));
           this.quat.premultiply(qFix);
         }
+        // Smooth slerp toward surface normal at peak crests
+        const qTarget = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), centerNormal);
+        this.quat.slerp(qTarget, Math.min(1, dt * 8));
       }
     }
 
@@ -470,7 +477,7 @@ export class Tank {
     this.angVel.addScaledVector(torque, dt * this.invInertia);
     this.angVel.multiplyScalar(Math.max(0, 1 - (this.hasClimbingKit ? 6.0 : 1.6) * dt));
 
-    const maxAng = this.hasClimbingKit ? 2.2 : 5.5;
+    const maxAng = this.hasClimbingKit ? 2.0 : 5.5;
     if (this.angVel.lengthSq() > maxAng * maxAng) this.angVel.setLength(maxAng);
 
     this.pos.addScaledVector(this.vel, dt);
@@ -485,7 +492,6 @@ export class Tank {
     ).normalize();
   }
 
-  // ---------------------------------------------------------------- turret
   aimAt(point, dt) {
     this.aimPoint.copy(point);
 
