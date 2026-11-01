@@ -691,8 +691,23 @@ function onPlayerDeath() {
 // Screen-space pick: which live enemy hull is under the reticle? The pick box is
 // a little larger than the tank, which makes hitting them forgiving.
 const _pickV = new THREE.Vector3();
+const _pickWorld = new THREE.Vector3();
+const _sightDelta = new THREE.Vector3();
 
-function pickEnemyUnderCursor(groundDist) {
+function hasTerrainClearSightline(origin, target, distance) {
+  _sightDelta.subVectors(target, origin);
+  const steps = Math.ceil(distance / 3);
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = origin.x + _sightDelta.x * t;
+    const y = origin.y + _sightDelta.y * t;
+    const z = origin.z + _sightDelta.z * t;
+    if (y <= heightAt(x, z) + 0.15) return false;
+  }
+  return true;
+}
+
+function pickEnemyUnderCursor() {
   if (!enemyMgr) return null;
   const tanHalf = Math.tan((camera.fov * Math.PI) / 360);
   const aspect = camera.aspect || 1;
@@ -704,8 +719,8 @@ function pickEnemyUnderCursor(groundDist) {
     _pickV.copy(e.pos);
     _pickV.y += 1.1;
     const d = _pickV.distanceTo(camera.position);
-    // out of range, or hidden behind the terrain the cursor is resting on
-    if (d > 900 || d > groundDist + 90) continue;
+    if (d > 900) continue;
+    _pickWorld.copy(_pickV);
     _pickV.project(camera);
     if (_pickV.z > 1) continue;
 
@@ -715,7 +730,10 @@ function pickEnemyUnderCursor(groundDist) {
     const nx = (_pickV.x - pointer.x) / rx;
     const ny = (_pickV.y - pointer.y) / ry;
     const score = nx * nx + ny * ny;
-    if (score < bestScore) { bestScore = score; best = e; }
+    if (score < bestScore && hasTerrainClearSightline(camera.position, _pickWorld, d)) {
+      bestScore = score;
+      best = e;
+    }
   }
   return best;
 }
@@ -775,8 +793,7 @@ function loop() {
   // onto it and the reticle turns green.
   targetLocked = false;
   if (enemyMgr && running) {
-    const groundDist = aimPoint.distanceTo(camera.position);
-    const target = pickEnemyUnderCursor(groundDist);
+    const target = pickEnemyUnderCursor();
     if (target) {
       targetLocked = true;
       aimPoint.copy(target.pos);

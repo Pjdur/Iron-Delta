@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { heightAt, normalAt, PLAY_RADIUS } from './terrain.js';
-import { clamp, wrapAngle } from './noise.js';
+import { clamp } from './noise.js';
 import { TrackSystem } from './tracks.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -11,6 +11,12 @@ const _v4 = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _dq = new THREE.Quaternion();
+const _aimOrigin = new THREE.Vector3();
+const _aimWorldDir = new THREE.Vector3();
+const _aimLocalDir = new THREE.Vector3();
+const _invRootQuat = new THREE.Quaternion();
+const SHELL_SPEED = 620;
+const SHELL_GRAVITY = 12.5;
 
 // ---------------------------------------------------------------------------
 function makeTrackTexture() {
@@ -495,25 +501,40 @@ export class Tank {
   aimAt(point, dt) {
     this.aimPoint.copy(point);
 
-    const fwd = _fwd.set(0, 0, -1).applyQuaternion(this.quat);
-    const bodyYaw = Math.atan2(-fwd.x, -fwd.z);
-
     const dx = point.x - this.pos.x;
     const dz = point.z - this.pos.z;
-    const dy = point.y - (this.pos.y + 1.4);
+    _invRootQuat.copy(this.quat).invert();
+    _aimLocalDir.set(dx, 0, dz).applyQuaternion(_invRootQuat);
+    this.turretYaw = Math.atan2(-_aimLocalDir.x, -_aimLocalDir.z);
 
-    const worldYaw = Math.atan2(-dx, -dz);
-    let targetLocal = wrapAngle(worldYaw - bodyYaw);
+    this.turret.rotation.y = this.turretYaw;
+    this.gunPivot.rotation.x = this.gunPitch;
+    this.root.updateMatrixWorld(true);
+    this.muzzle.getWorldPosition(_aimOrigin);
 
-    targetLocal = clamp(targetLocal, -Math.PI, Math.PI);
-    this.turretYaw = wrapAngle(
-      this.turretYaw + clamp(wrapAngle(targetLocal - this.turretYaw), -1.5 * dt, 1.5 * dt)
+    const muzzleDx = point.x - _aimOrigin.x;
+    const muzzleDz = point.z - _aimOrigin.z;
+    const muzzleDy = point.y - _aimOrigin.y;
+    const horiz = Math.hypot(muzzleDx, muzzleDz);
+    const speedSquared = SHELL_SPEED * SHELL_SPEED;
+    const discriminant = speedSquared * speedSquared - SHELL_GRAVITY * (
+      SHELL_GRAVITY * horiz * horiz + 2 * muzzleDy * speedSquared
     );
-
-    const horiz = Math.hypot(dx, dz);
-    let targetPitch = Math.atan2(dy, Math.max(0.01, horiz));
-    targetPitch = clamp(targetPitch, -0.16, 0.34);
-    this.gunPitch += clamp(targetPitch - this.gunPitch, -0.9 * dt, 0.9 * dt);
+    let worldPitch = Math.atan2(muzzleDy, Math.max(0.01, horiz));
+    if (horiz > 0.01 && discriminant >= 0) {
+      worldPitch = Math.atan(
+        (speedSquared - Math.sqrt(discriminant)) / (SHELL_GRAVITY * horiz)
+      );
+    }
+    _aimWorldDir.set(muzzleDx, 0, muzzleDz).normalize().multiplyScalar(Math.cos(worldPitch));
+    _aimWorldDir.y = Math.sin(worldPitch);
+    _aimLocalDir.copy(_aimWorldDir).applyQuaternion(_invRootQuat).normalize();
+    this.turretYaw = Math.atan2(-_aimLocalDir.x, -_aimLocalDir.z);
+    const localPitch = Math.atan2(
+      _aimLocalDir.y,
+      Math.hypot(_aimLocalDir.x, _aimLocalDir.z)
+    );
+    this.gunPitch = clamp(localPitch, -0.16, 0.34);
 
     this.turret.rotation.y = this.turretYaw;
     this.gunPivot.rotation.x = this.gunPitch;
@@ -544,7 +565,7 @@ export class Tank {
     this.effects.fireShell(
       muzzlePos.clone().addScaledVector(dir, 1.2),
       dir,
-      620
+      SHELL_SPEED
     );
     return { pos: muzzlePos, dir };
   }
