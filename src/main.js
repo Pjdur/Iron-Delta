@@ -767,6 +767,8 @@ function loop() {
   frameCount++;
 
   windUniforms.uTime.value = elapsed;
+  tracks.update(dt);
+  footprints.update(dt);
 
   if (running && !shopOpen) {
     readInput();

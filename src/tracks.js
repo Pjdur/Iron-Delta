@@ -54,6 +54,9 @@ export class TrackSystem {
     this.positions = new Float32Array(nVerts * 3);
     this.uvs = new Float32Array(nVerts * 2);
     this.colors = new Float32Array(nVerts * 3);
+    this.fades = new Float32Array(this.max * 6);
+    this.createdAt = new Float64Array(this.max);
+    this.age = 0;
     // park unused geometry far below the world
     for (let i = 0; i < nVerts; i++) {
       this.positions[i * 3] = 0;
@@ -79,6 +82,7 @@ export class TrackSystem {
     geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(this.uvs, 2));
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+    geo.setAttribute('trackFade', new THREE.BufferAttribute(this.fades, 1));
     geo.setIndex(new THREE.BufferAttribute(indices, 1));
 
     const mat = new THREE.MeshLambertMaterial({
@@ -91,6 +95,14 @@ export class TrackSystem {
       polygonOffsetFactor: -4,
       polygonOffsetUnits: -4,
     });
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float trackFade;\nvarying float vTrackFade;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTrackFade = trackFade;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vTrackFade;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vTrackFade;');
+    };
 
     this.geo = geo;
     this.mesh = new THREE.Mesh(geo, mat);
@@ -110,6 +122,8 @@ export class TrackSystem {
 
     const P = this.positions;
     const U = this.uvs;
+    this.createdAt[q] = this.age;
+    for (let i = 0; i < 6; i++) this.fades[base + i] = 1;
 
     const setV = (o, p, u, v) => {
       P[(base + o) * 3 + 0] = p.x;
@@ -129,6 +143,24 @@ export class TrackSystem {
 
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.uv.needsUpdate = true;
+    this.geo.attributes.trackFade.needsUpdate = true;
+  }
+
+  /** Age old impressions into faint, terrain-revealing marks. */
+  update(dt) {
+    this.age += dt;
+    const lifetime = 35;
+    const residual = 0.035;
+    const fadeAttr = this.geo.attributes.trackFade;
+    for (let q = 0; q < this.max; q++) {
+      const age = this.age - this.createdAt[q];
+      if (age < 0 || age >= lifetime) continue;
+      const t = age / lifetime;
+      const fade = 1 - (1 - residual) * t * t * (3 - 2 * t);
+      const base = q * 6;
+      for (let i = 0; i < 6; i++) this.fades[base + i] = fade;
+    }
+    fadeAttr.needsUpdate = true;
   }
 
   /** Convenience: emits a strip segment between two world centres. */
