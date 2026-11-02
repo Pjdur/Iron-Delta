@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { heightAt, normalAt, PLAY_RADIUS } from './terrain.js';
+import { heightAt, normalAt, WATER_LEVEL, PLAY_RADIUS } from './terrain.js';
 import { clamp } from './noise.js';
 import { TrackSystem } from './tracks.js';
 
@@ -95,6 +95,10 @@ export class Tank {
     this.speed = 0;
     this.sliding = 0;
     this.flipTimer = 0;
+
+    // Water state — updated each step when the sea reference is provided.
+    this.inWater = false;
+    this.waterDepth = 0;
 
     this.trackTex = makeTrackTexture();
 
@@ -236,7 +240,7 @@ export class Tank {
   }
 
   // --------------------------------------------------------------- physics
-  step(dt, input, tracks) {
+  step(dt, input, tracks, sea = null) {
     if (!this.alive) {
       this.throttle = 0;
       this.steer = 0;
@@ -253,6 +257,28 @@ export class Tank {
     const SUB = 4;
     const h = dt / SUB;
     for (let i = 0; i < SUB; i++) this._substep(h);
+
+    // ---- water: detect hull submersion so spray effects and the
+    //      underwater overlay know how deep the tank is. The water
+    //      itself offers no drag — the tank drives through it like
+    //      land, only with buoyancy pushing it toward the surface. ----
+    this.inWater = false;
+    this.waterDepth = 0;
+    if (sea) {
+      const surfaceY = sea.surfaceHeight(this.pos.x, this.pos.z);
+      // hull reference height is roughly the centre of the body
+      const hullY = this.pos.y - 0.4;
+      if (hullY < surfaceY) {
+        this.inWater = true;
+        // 0 at the surface, 1 fully submerged by ~3 m
+        this.waterDepth = clamp((surfaceY - hullY) / 3.0, 0.0, 1.0);
+
+        // Buoyancy: a gentle upward push so a fully submerged tank bobs
+        // toward the surface instead of sitting on the seabed.
+        this.vel.y += 6.0 * this.waterDepth * dt;
+      }
+    }
+
 
     const d = Math.hypot(this.pos.x, this.pos.z);
     if (d > PLAY_RADIUS) {
@@ -307,6 +333,32 @@ export class Tank {
             0.18, 0.13, 0.08,
             0.5 + Math.random() * 0.7,
             0.5 + Math.random(), -18, 0.6, 0
+          );
+        }
+      }
+    }
+
+    // ---- water splash: when the tank is in the sea, spray kicks up around
+    //      the hull as it churns the water. Stronger spray the faster the
+    //      tank is moving and the deeper it is. ----
+    if (this.inWater && Math.abs(this.speed) > 0.4 && this.effects) {
+      const sprayChance = 0.45 * Math.min(1, Math.abs(this.speed) * 0.20 + this.waterDepth);
+      if (Math.random() < sprayChance) {
+        const fwd = _fwd.set(0, 0, -1).applyQuaternion(this.quat);
+        // emit at the bow (front) of the tank, near the waterline
+        _v1.copy(this.pos).addScaledVector(fwd, 2.4);
+        _v1.y = Math.max(this.pos.y - 0.5, this.pos.y - 0.4);
+        for (let i = 0; i < 2; i++) {
+          this.effects.smoke.emit(
+            _v1.x + (Math.random() - 0.5) * 1.6,
+            _v1.y + 0.3,
+            _v1.z + (Math.random() - 0.5) * 1.6,
+            (Math.random() - 0.5) * 4 + fwd.x * Math.abs(this.speed) * 0.4,
+            2 + Math.random() * 4,
+            (Math.random() - 0.5) * 4 + fwd.z * Math.abs(this.speed) * 0.4,
+            0.78, 0.85, 0.92,
+            0.5 + Math.random() * 0.8,
+            0.55 + Math.random() * 0.5, -9, 1.4, 0.5
           );
         }
       }

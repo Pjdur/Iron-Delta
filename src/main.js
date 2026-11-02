@@ -8,6 +8,8 @@ import { Effects } from './effects.js';
 import { Tank } from './tank.js';
 import { Soldiers } from './soldiers.js';
 import { EnemyManager } from './enemies.js';
+import { Sea } from './sea.js';
+import { UnderwaterView } from './underwater.js';
 import { clamp, wrapAngle } from './noise.js';
 
 // ---------------------------------------------------------------------------
@@ -102,24 +104,9 @@ sky.renderOrder = -10;
 scene.add(sky);
 
 // ---------------------------------------------------------------------------
-// Water
+// Sea — Gerstner-wave ocean. Created after the terrain is loaded in boot().
 // ---------------------------------------------------------------------------
-const water = new THREE.Mesh(
-  new THREE.PlaneGeometry(WORLD_SIZE * 1.2, WORLD_SIZE * 1.2, 1, 1),
-  new THREE.MeshStandardMaterial({
-    color: 0x25353c, 
-    roughness: 0.12, 
-    metalness: 0.65,
-    transparent: true, 
-    opacity: 0.9, 
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  })
-);
-water.rotation.x = -Math.PI / 2;
-water.position.y = WATER_LEVEL;
-water.receiveShadow = false;
-scene.add(water);
+let sea = null;
 
 // ---------------------------------------------------------------------------
 // World objects & Scoring
@@ -216,6 +203,7 @@ async function boot() {
   progress(0.02, 'Carving terrain');
 
   terrain = new Terrain(scene);
+  sea = new Sea(scene, SUN_DIR);
   await nextFrame();
 
   const totalFine = GRID * GRID;
@@ -622,6 +610,16 @@ const el = {
   grid: document.getElementById('gridRef'),
 };
 
+// ---------------------------------------------------------------------------
+// Underwater view — layered submersion effects (depth tint, sunlit surface
+// glow, god rays, marine snow, bubbles). Driven from the main loop; the
+// effect kicks in when the TURRET dips below the sea surface, so the view
+// changes to underwater even while the chase camera still hangs above
+// the waves.
+// ---------------------------------------------------------------------------
+const underwater = new UnderwaterView();
+const _uwTurret = new THREE.Vector3();
+
 function buildCompass() {
   const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
   let html = '';
@@ -772,7 +770,7 @@ function loop() {
 
   if (running && !shopOpen) {
     readInput();
-    tank.step(dt, input, tracks);
+    tank.step(dt, input, tracks, sea);
     tank.updateReload(dt);
     if (!tank.alive && !playerDead) onPlayerDeath();
   } else if (shopOpen) {
@@ -819,7 +817,48 @@ function loop() {
 
   renderer.shadowMap.needsUpdate = frameCount % shadowEvery === 0;
 
-  water.position.y = WATER_LEVEL + Math.sin(elapsed * 0.6) * 0.06;
+  if (sea) sea.update(dt, camera, elapsed);
+
+  // ---- underwater view: the perspective changes as soon as the TURRET
+  //      dips below the sea surface (whichever is deeper — turret or
+  //      camera — drives it). Layered overlay fades in with depth, the
+  //      scene fog pulls in close and turns blue, and the sea surface
+  //      itself fades into the same blue haze so the "ceiling" above you
+  //      blends into the water. ----
+  if (sea) {
+    const camSurfaceY = sea.surfaceHeight(camera.position.x, camera.position.z);
+    const camDepth = camSurfaceY - camera.position.y;
+    tank.turret.getWorldPosition(_uwTurret);
+    const turretSurfaceY = sea.surfaceHeight(_uwTurret.x, _uwTurret.z);
+    const turretDepth = turretSurfaceY - _uwTurret.y;
+    const depth = Math.max(camDepth, turretDepth);
+
+    underwater.setDepth(depth);
+    underwater.update(dt, camera);
+
+    if (depth > 0.05) {
+      // 0 at the surface, 1 by ~6 m down — full "deep blue" by then.
+      const submerge = Math.min(1, depth / 6.0);
+      // pull the scene fog in closer when submerged so the world fades
+      // into blue haze a short distance away
+      scene.fog.density = 0.00052 + submerge * 0.020;
+      scene.fog.color.setRGB(
+        0.04 + (1 - submerge) * 0.18,
+        0.10 + (1 - submerge) * 0.22,
+        0.16 + (1 - submerge) * 0.22
+      );
+      renderer.setClearColor(scene.fog.color, 1);
+      // match the sea's own fog to the underwater haze
+      sea.material.uniforms.uFogColor.value.copy(scene.fog.color);
+      sea.material.uniforms.uFogDensity.value = 0.0045 + submerge * 0.02;
+    } else {
+      scene.fog.density = 0.00052;
+      scene.fog.color.setHex(FOG_COLOR);
+      renderer.setClearColor(FOG_COLOR, 1);
+      sea.material.uniforms.uFogColor.value.setHex(0xa2adb3);
+      sea.material.uniforms.uFogDensity.value = 0.0018;
+    }
+  }
 
   effects.applyShake(camera, elapsed);
 
@@ -858,6 +897,7 @@ window.__game = {
   get score() { return score; },
   get grass() { return grass; },
   get terrain() { return terrain; },
+  get sea() { return sea; },
   get sun() { return sun; },
   get hemi() { return hemi; },
   addScore,
