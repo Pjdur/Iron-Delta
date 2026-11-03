@@ -586,7 +586,7 @@ export class Ship {
       t.pitch += clamp(e - t.pitch, -spec.gunPitchRate * dt, spec.gunPitchRate * dt);
       t.pivot.rotation.x = t.pitch;
 
-      t.ready = Math.abs(err) < 0.055 && Math.abs(e - t.pitch) < 0.045;
+      t.ready = Math.abs(err) < 0.08 && Math.abs(e - t.pitch) < 0.06;
       if (t.ready) readyCount++;
     }
     this._turretsReady = readyCount;

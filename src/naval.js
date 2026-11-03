@@ -45,7 +45,7 @@ const AXIS_Z = new THREE.Vector3(0, 0, 1);
 // to reload) instead of sharing the player's buffed numbers directly.
 // ---------------------------------------------------------------------------
 const ENEMY_NERF = {
-  speed: 0.55, chassis: 0.7, turn: 0.5, rudder: 0.65, hp: 0.55, reload: 2.6,
+  speed: 0.55, chassis: 0.7, turn: 0.7, rudder: 0.8, hp: 0.55, reload: 2.6,
 };
 
 function enemySpec(base) {
@@ -649,7 +649,7 @@ export class NavalBattle {
 
     progress(0.7, 'Raising steam');
     await nextFrame();
-    for (let i = 0; i < 2; i++) this.spawnEnemy();
+    for (let i = 0; i < 3; i++) this.spawnFleet();
 
     progress(0.88, 'Manning the guns');
     await nextFrame();
@@ -769,10 +769,16 @@ export class NavalBattle {
       this.el.crosshair.classList.add('reloading');
       return;
     }
+    const total = this.player.turrets.length;
+    const ready = this.player.turretsReady;
     const shots = this.player.fireSalvo();
     if (!shots) {
-      this.flashMessage('TURRETS STILL TRAINING');
+      // no turret on target yet: say so, in numbers, not jargon
+      this.flashMessage(`MAIN GUNS TRAINING — ${ready}/${total} TURRETS ON TARGET`);
       return;
+    }
+    if (ready < total) {
+      this.flashMessage(`PARTIAL SALVO — ${shots.length / 2 | 0}/${total} TURRETS FIRED`);
     }
     for (const s of shots) {
       this.spawnShell(s.pos, s.dir, this.player.spec.shellSpeed, true);
@@ -795,28 +801,89 @@ export class NavalBattle {
   }
 
   // ------------------------------------------------------------------ spawn
-  spawnEnemy(typeKey) {
+  spawnEnemy(typeKey, sx, sz, fleet = null) {
     const type = typeKey || (Math.random() < 0.72 ? 'destroyer' : 'cruiser');
-    for (let attempt = 0; attempt < 30; attempt++) {
+    let x = sx, z = sz;
+    if (x === undefined) {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = 2300 + Math.random() * 1100;
+        x = this.player.pos.x + Math.cos(a) * r;
+        z = this.player.pos.z + Math.sin(a) * r;
+        if (Math.hypot(x, z) > NAVAL_PLAY_RADIUS - 350) continue;
+        if (navalHeightAt(x, z) > -26) break;
+        x = undefined;
+      }
+      if (x === undefined) return null;
+    }
+
+    const e = new Ship(this.scene, type, { fx: this.fx, sea: this.sea, spec: enemySpec(SHIP_SPECS[type]) });
+    e.pos.set(x, WATER_LEVEL, z);
+    e.yaw = Math.random() * Math.PI * 2;
+    e.ai = {
+      state: 'approach', timer: 0, desiredYaw: e.yaw, throttle: 1,
+      aim: new THREE.Vector3(x, WATER_LEVEL, z),
+      scatter: new THREE.Vector3(), scatterT: 0,
+      torpCd: 45 + Math.random() * 40,
+      skill: 0.45 + Math.random() * 0.35,
+      fleet, role: fleet ? (type === 'cruiser' ? 'leader' : 'escort') : 'solo',
+      slot: Math.random() * Math.PI * 2,
+      torpRun: 0,
+      edge: false,   // committed to an inward turn at the play-area rim
+    };
+    if (fleet) fleet.ships.push(e);
+    this.enemies.push(e);
+    return e;
+  }
+
+  /** An enemy fleet: one cruiser with a screen of five destroyers around it. */
+  spawnFleet() {
+    for (let attempt = 0; attempt < 40; attempt++) {
       const a = Math.random() * Math.PI * 2;
-      const r = 2300 + Math.random() * 1100;
+      const r = 1900 + Math.random() * 1000;
       const x = this.player.pos.x + Math.cos(a) * r;
       const z = this.player.pos.z + Math.sin(a) * r;
-      if (Math.hypot(x, z) > NAVAL_PLAY_RADIUS - 350) continue;
-      if (navalHeightAt(x, z) > -26) continue;
+      if (Math.hypot(x, z) > NAVAL_PLAY_RADIUS - 800) continue;
+      if (navalHeightAt(x, z) > -30) continue;
 
-      const e = new Ship(this.scene, type, { fx: this.fx, sea: this.sea, spec: enemySpec(SHIP_SPECS[type]) });
-      e.pos.set(x, WATER_LEVEL, z);
-      e.yaw = Math.random() * Math.PI * 2;
-      e.ai = {
-        state: 'approach', timer: 0, desiredYaw: e.yaw, throttle: 1,
-        aim: new THREE.Vector3(x, WATER_LEVEL, z),
-        scatter: new THREE.Vector3(), scatterT: 0,
-        torpCd: 45 + Math.random() * 40,
-        skill: 0.3 + Math.random() * 0.25,
-      };
-      this.enemies.push(e);
-      return e;
+      const fleet = { ships: [], leader: null };
+      const c = this.spawnEnemy('cruiser', x, z, fleet);
+      if (!c) return null;
+      fleet.leader = c;
+      c.yaw = Math.atan2(-(this.player.pos.x - x), -(this.player.pos.z - z));
+
+      // five destroyers in a protective ring around the cruiser
+      let escorts = 0;
+      for (let i = 0; i < 5; i++) {
+        const sa = (i / 5) * Math.PI * 2;
+        // keep trying angles/radii until the slot is on deep water inside the
+        // boundary — every fleet ships with a full screen of five
+        for (let k = 0; k < 14; k++) {
+          const jitter = sa + (Math.random() - 0.5) * (k < 7 ? 0.4 : 1.4);
+          const sr = 150 + Math.random() * 150;
+          const ex = x + Math.cos(jitter) * sr;
+          const ez = z + Math.sin(jitter) * sr;
+          if (navalHeightAt(ex, ez) > -20) continue;
+          if (Math.hypot(ex, ez) > NAVAL_PLAY_RADIUS - 400) continue;
+          const d = this.spawnEnemy('destroyer', ex, ez, fleet);
+          if (d) {
+            d.yaw = c.yaw;
+            d.ai.slot = jitter;   // remember which sector of the screen it holds
+            escorts++;
+          }
+          break;
+        }
+      }
+      // last resort for any slot that never found water: tight alongside
+      while (escorts < 5) {
+        const da = Math.random() * Math.PI * 2;
+        const d = this.spawnEnemy('destroyer', x + Math.cos(da) * 90, z + Math.sin(da) * 90, fleet);
+        if (!d) break;
+        d.yaw = c.yaw;
+        d.ai.slot = da;
+        escorts++;
+      }
+      return c;
     }
     return null;
   }
@@ -876,6 +943,14 @@ export class NavalBattle {
 
     // ---- enemies ----
     this.updateEnemies(dt);
+
+    // ---- hull-to-hull collisions (matters now ships fight in formation) ----
+    const hulls = [this.player, ...this.enemies].filter((s) => !s.sinking && !s.gone);
+    for (let i = 0; i < hulls.length; i++) {
+      for (let j = i + 1; j < hulls.length; j++) {
+        this._shipCollision(hulls[i], hulls[j]);
+      }
+    }
 
     // ---- projectiles ----
     this.updateShells(dt);
@@ -1044,6 +1119,8 @@ export class NavalBattle {
       e.ai.timer -= dt;
       if (e.ai.timer <= 0) {
         e.ai.timer = 0.45;
+        const leader = e.ai.fleet && e.ai.fleet.leader && !e.ai.fleet.leader.gone
+          ? e.ai.fleet.leader : null;
         if (!p.alive) {
           e.ai.state = 'idle';
           e.ai.throttle = 0.4;
@@ -1052,10 +1129,21 @@ export class NavalBattle {
           e.ai.state = 'retreat';
           e.ai.throttle = 1;
           e.ai.desiredYaw = bearingToPlayer + Math.PI + (Math.random() - 0.5) * 0.5;
+        } else if (e.ai.role === 'escort' && leader && dist > 2600) {
+          // player not yet a threat: hold formation around the fleet leader
+          e.ai.state = 'escort';
         } else if (dist > 2100) {
           e.ai.state = 'approach';
           e.ai.throttle = 1;
           e.ai.desiredYaw = bearingToPlayer + (Math.random() - 0.5) * 0.35;
+        } else if (
+          e.spec.torps && e.ai.torpRun > 0 && dist > 500 &&
+          Math.abs(wrapAngle(bearingToPlayer - e.yaw)) < 1.1
+        ) {
+          // committed torpedo run: charge straight in until the tubes bear
+          e.ai.state = 'torpedorun';
+          e.ai.throttle = 1;
+          e.ai.desiredYaw = bearingToPlayer;
         } else {
           e.ai.state = 'battle';
           e.ai.throttle = 0.82;
@@ -1065,24 +1153,45 @@ export class NavalBattle {
         }
       }
 
-      // ---- island & boundary avoidance overrides ----
-      e.forward(_v3);
-      const ax = e.pos.x + _v3.x * 330;
-      const az = e.pos.z + _v3.z * 330;
-      if (navalHeightAt(ax, az) > -12) {
-        // steer away from the island we're heading toward
-        let nearest = ISLANDS[0];
-        let nd = Infinity;
-        for (const isl of ISLANDS) {
-          const d2 = (e.pos.x - isl.x) ** 2 + (e.pos.z - isl.z) ** 2;
-          if (d2 < nd) { nd = d2; nearest = isl; }
+      // ---- escort steering: keep station on the fleet leader ----
+      if (e.ai.state === 'escort') {
+        const leader = e.ai.fleet.leader;
+        if (leader && !leader.gone) {
+          const slotYaw = leader.yaw + e.ai.slot;
+          const ring = e.spec.length * 2 + 120;
+          const tx = leader.pos.x + Math.sin(slotYaw) * ring;
+          const tz = leader.pos.z + Math.cos(slotYaw) * ring;
+          const toX = tx - e.pos.x, toZ = tz - e.pos.z;
+          const toD = Math.hypot(toX, toZ);
+          if (toD > 30) e.ai.desiredYaw = Math.atan2(-toX, -toZ);
+          // match the leader's speed so the screen holds together
+          e.ai.throttle = clamp(toD / 220 + Math.abs(leader.speed) / leader.spec.maxSpeed, 0.3, 1);
+        } else {
+          e.ai.state = 'approach';
         }
-        e.ai.desiredYaw = Math.atan2(-(e.pos.x - nearest.x), -(e.pos.z - nearest.z));
-        e.ai.throttle = Math.min(e.ai.throttle, 0.55);
       }
+
+      // ---- play-area edge: commit to an inward turn BEFORE the boundary ----
+      // Distance-based trigger, not heading-based: a tangential drifter with
+      // barely-outward heading used to creep all the way to the hard clamp
+      // before turning. Anything not already solidly inbound commits now.
       const dOrigin = Math.hypot(e.pos.x, e.pos.z);
-      if (dOrigin > NAVAL_PLAY_RADIUS - 450) {
-        e.ai.desiredYaw = Math.atan2(-e.pos.x, -e.pos.z);
+      const outward = _v3.x * (e.pos.x / (dOrigin || 1)) + _v3.z * (e.pos.z / (dOrigin || 1));
+      if (!e.ai.edge && dOrigin > NAVAL_PLAY_RADIUS - 900 && outward > -0.25) {
+        e.ai.edge = true;
+      }
+      if (e.ai.edge) {
+        if (dOrigin < NAVAL_PLAY_RADIUS - 1600) {
+          e.ai.edge = false;
+        } else {
+          // steer at a waypoint 1100 m inward, biased toward the player so
+          // ships curve back into the fight rather than circling the rim
+          const inR = Math.max(0, dOrigin - 1100);
+          const wx = (e.pos.x / (dOrigin || 1)) * inR + (p.pos.x - e.pos.x) * 0.3;
+          const wz = (e.pos.z / (dOrigin || 1)) * inR + (p.pos.z - e.pos.z) * 0.3;
+          e.ai.desiredYaw = Math.atan2(-(wx - e.pos.x), -(wz - e.pos.z));
+          e.ai.throttle = Math.min(e.ai.throttle, 0.9);
+        }
       }
 
       // ---- torpedo evasion ----
@@ -1101,9 +1210,40 @@ export class NavalBattle {
         }
       }
 
+      // ---- island avoidance: ships never enter shallow water ----
+      // Fans probes out around the hull and steers for the deepest channel.
+      // A commitment timer keeps the chosen channel locked in so ships don't
+      // dither along shorelines; this outranks every other steering want.
+      e.forward(_v3);
+      e.ai.avoidT = (e.ai.avoidT || 0) - dt;
+      const lookD = 380 + Math.abs(e.speed) * 26;   // sees farther at speed
+      const ahead = navalHeightAt(
+        e.pos.x - _v3.x * lookD, e.pos.z - _v3.z * lookD,
+      );
+      if (ahead > -16) e.ai.avoidT = 2.4;           // shallow straight ahead?
+      if (e.ai.avoidT > 0) {
+        let bestScore = -Infinity;
+        for (const off of [-1.3, -0.8, -0.4, 0, 0.4, 0.8, 1.3]) {
+          const py = e.yaw + off;
+          const dxp = -Math.sin(py), dzp = -Math.cos(py);
+          let depth = Infinity;                     // shallowest point on ray
+          for (const k of [0.25, 0.55, 1, 1.6]) {
+            const h = navalHeightAt(e.pos.x + dxp * lookD * k, e.pos.z + dzp * lookD * k);
+            if (h < depth) depth = h;
+          }
+          // near-ties prefer the heading the AI already wants, so avoidance
+          // bends the route instead of replacing it
+          const pref = -Math.abs(wrapAngle(e.ai.desiredYaw - py)) * 5;
+          const score = depth + pref;
+          if (score > bestScore) { bestScore = score; e.ai.desiredYaw = py; }
+        }
+        e.ai.throttle = Math.min(e.ai.throttle, ahead > -9 ? 0.4 : 0.75);
+      }
+
       // ---- steering ----
       const err = wrapAngle(e.ai.desiredYaw - e.yaw);
-      e.rudder = clamp(err * 1.7, -1, 1);
+      // an edge turn gets full-hard rudder so it answers immediately
+      e.rudder = clamp(err * (e.ai.edge ? 3.0 : 1.7), -1, 1);
       e.throttle = e.ai.throttle;
 
       e.updateReloads(dt);
@@ -1111,17 +1251,25 @@ export class NavalBattle {
       this._boundary(e, dt);
       this._grounding(e, dt, true);
 
+      // ---- torpedo runs: destroyers commit when tubes are ready ----
+      if (e.spec.torps && e.ai.torpRun <= 0 && e.ai.torpCd < 8 && dist < 2600 && dist > 900) {
+        e.ai.torpRun = 1;
+      }
+
       // ---- gunnery ----
       e.ai.scatterT -= dt;
       if (e.ai.scatterT <= 0) {
         e.ai.scatterT = 2.5;
+        // better bots scatter less: skill tightens the dispersion
         const rad = 40 + dist * 0.085 * (1.25 - e.ai.skill);
         const a = Math.random() * Math.PI * 2;
         const rr = Math.sqrt(Math.random()) * rad;
         e.ai.scatter.set(Math.cos(a) * rr, 0, Math.sin(a) * rr);
       }
       const tof = dist / e.spec.shellSpeed;
-      e.ai.aim.copy(p.pos).addScaledVector(p.forward(_v3), p.speed * tof * 0.8);
+      // full lead prediction scaled by skill (was a flat 0.8 guess)
+      const lead = 0.55 + 0.45 * e.ai.skill;
+      e.ai.aim.copy(p.pos).addScaledVector(p.forward(_v3), p.speed * tof * lead);
       e.ai.aim.y += 2;
       if (!p.alive) e.ai.aim.copy(e.pos).addScaledVector(e.forward(_v3), 800).setY(WATER_LEVEL);
       e.ai.aim.add(e.ai.scatter);
@@ -1140,11 +1288,12 @@ export class NavalBattle {
         }
       }
 
-      // ---- enemy torpedoes (destroyers only, close range) ----
+      // ---- enemy torpedoes (destroyers, on torpedo runs or close aboard) ----
       e.ai.torpCd -= dt;
-      if (e.spec.torps && p.alive && e.ai.torpCd <= 0 && dist < 1400) {
+      if (e.spec.torps && p.alive && e.ai.torpCd <= 0 && dist < 1600) {
         const broadside = Math.abs(Math.abs(wrapAngle(bearingToPlayer - e.yaw)) - Math.PI / 2) < 0.8;
-        if (broadside) {
+        const bowed = Math.abs(wrapAngle(bearingToPlayer - e.yaw)) < 0.45;
+        if (broadside || (bowed && e.ai.torpRun > 0)) {
           const leadT = dist / e.spec.torps.speed;
           const aimX = p.pos.x + p.forward(_v3).x * p.speed * leadT;
           const aimZ = p.pos.z + _v3.z * p.speed * leadT;
@@ -1152,17 +1301,22 @@ export class NavalBattle {
           if (launches) {
             for (const l of launches) this.spawnTorp(l);
             e.ai.torpCd = 120 + Math.random() * 60;
+            e.ai.torpRun = 0;
+            // snap off a retreat turn after launching
+            e.ai.broadsideSide = e.ai.broadsideSide || 1;
+            e.ai.state = 'battle';
+            e.ai.timer = 0;
           }
         }
       }
     }
 
-    // keep the fight populated
+    // keep the fight populated: always keep several full fleets at sea
     this.spawnTimer -= dt;
     const aliveCount = this.enemies.filter((e) => !e.sinking).length;
-    if (this.spawnTimer <= 0 && aliveCount < 2 && this.enemies.length < 3) {
-      this.spawnTimer = 28;
-      this.spawnEnemy();
+    if (this.spawnTimer <= 0 && aliveCount < 10 && this.enemies.length < 13) {
+      this.spawnTimer = 22;
+      if (!this.spawnFleet()) this.spawnTimer = 6;
     }
   }
 
@@ -1365,6 +1519,8 @@ export class NavalBattle {
       ship.pos.x *= s;
       ship.pos.z *= s;
       ship.speed *= 0.985;
+      // anything that touches the hard clamp turns back in immediately
+      if (ship.ai && !ship.sinking) ship.ai.edge = true;
       if (ship === this.player && this.frameCount % 60 === 0) {
         this.flashMessage('BATTLE BOUNDARY — COME ABOUT');
       }
@@ -1432,6 +1588,10 @@ export class NavalBattle {
       this.el.crosshair.style.top = `${py}px`;
       this.el.crosshair.classList.toggle('onTarget', !!this.locked);
       this.el.crosshair.classList.toggle('reloading', this.player.gunReload > 0);
+      this.el.crosshair.classList.toggle(
+        'training',
+        this.player.gunReload <= 0 && this.player.turretsReady < this.player.turrets.length,
+      );
     }
     if (this.el.range) {
       this.el.range.style.left = `${px}px`;
@@ -1507,18 +1667,37 @@ export class NavalBattle {
       ctx.fillRect(tx - 1, tz - 1, 2, 2);
     }
 
-    // enemies
+    // enemies — cruisers as squares, destroyers as triangles, with heading
     for (const e of this.enemies) {
       if (e.gone) continue;
       const [ex, ez] = toMap(e.pos.x, e.pos.z);
-      ctx.strokeStyle = e.sinking ? 'rgba(255,120,80,0.4)' : 'rgba(255,80,60,0.95)';
+      const dead = e.sinking;
+      ctx.strokeStyle = dead ? 'rgba(255,120,80,0.4)' : 'rgba(255,80,60,0.95)';
+      ctx.fillStyle = dead ? 'rgba(255,120,80,0.5)' : 'rgba(255,80,60,0.95)';
+      // heading line uses the same -sin/-cos forward convention as the hulls
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(ex, ez);
-      ctx.lineTo(ex - Math.sin(e.yaw) * 6, ez - Math.cos(e.yaw) * 6);
+      ctx.lineTo(ex - Math.sin(e.yaw) * 7, ez - Math.cos(e.yaw) * 7);
       ctx.stroke();
-      ctx.fillStyle = e.sinking ? 'rgba(255,120,80,0.5)' : 'rgba(255,80,60,0.95)';
-      ctx.fillRect(ex - 2, ez - 2, 4, 4);
+
+      const hx = -Math.sin(e.yaw), hz = -Math.cos(e.yaw);   // forward unit
+      ctx.beginPath();
+      if (e.spec.key === 'cruiser') {
+        // square, sized for the bigger hull
+        ctx.save();
+        ctx.translate(ex, ez);
+        ctx.rotate(-e.yaw);
+        ctx.fillRect(-3, -4, 6, 8);
+        ctx.restore();
+      } else {
+        // triangle pointing along the heading
+        ctx.moveTo(ex + hx * 4, ez + hz * 4);
+        ctx.lineTo(ex - hx * 3 - hz * 2.6, ez - hz * 3 + hx * 2.6);
+        ctx.lineTo(ex - hx * 3 + hz * 2.6, ez - hz * 3 - hx * 2.6);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
 
     // player
@@ -1526,7 +1705,9 @@ export class NavalBattle {
     const [px, pz] = toMap(p.pos.x, p.pos.z);
     ctx.save();
     ctx.translate(px, pz);
-    ctx.rotate(p.yaw);
+    // canvas y grows downward, so the arrow needs -yaw to match the
+    // -sin/-cos forward convention used by the ships themselves
+    ctx.rotate(-p.yaw);
     ctx.fillStyle = p.alive ? '#ffb545' : 'rgba(255,181,69,0.4)';
     ctx.beginPath();
     ctx.moveTo(0, -6);
