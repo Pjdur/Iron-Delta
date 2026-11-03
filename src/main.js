@@ -10,6 +10,7 @@ import { Soldiers } from './soldiers.js';
 import { EnemyManager } from './enemies.js';
 import { Sea } from './sea.js';
 import { UnderwaterView } from './underwater.js';
+import { NavalBattle } from './naval.js';
 import { clamp, wrapAngle } from './noise.js';
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,15 @@ let mapBase = null;
 
 const input = { throttle: 0, steer: 0, brake: false, boost: false };
 const cam = { yawOffset: 0, followYaw: 0, pitch: 0.2, dist: 20 };
+
+// ---------------------------------------------------------------------------
+// Game mode — ground (tank) or naval (ships). The start screen picks one;
+// naval gets its own scene/camera/loop inside NavalBattle.
+// ---------------------------------------------------------------------------
+let selectedMode = 'ground';
+let naval = null;
+function navalActive() { return !!(naval && navalMode); }
+let navalMode = false;
 
 // ---------------------------------------------------------------------------
 // Adaptive quality
@@ -498,7 +508,48 @@ function toggleShop(open) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Quartermaster Shop — different stock for each theatre
+// ---------------------------------------------------------------------------
+const SHOP_ITEMS = {
+  ground: [
+    { id: 'ammo', name: 'Ammo Resupply (+100 Ammo)', desc: 'Restores and expands ammunition reserves', cost: 300 },
+    { id: 'health', name: 'Armor & Hull Repair (+100 HP)', desc: 'Patches armor plating and restores hull integrity', cost: 400 },
+    { id: 'climb', name: 'Mountain Climbing Kit', desc: 'Boosts engine power & anti-roll physics to climb steep mountains without slipping or flipping', cost: 1000 },
+  ],
+  naval: [
+    { id: 'dc', name: 'Damage Control Party', desc: 'Extinguish fires and restore engine power', cost: 250 },
+    { id: 'health', name: 'Hull Repair (+3500 HP)', desc: 'Welding parties patch the hull — can even refloat a settling ship', cost: 400 },
+    { id: 'torps', name: 'Torpedo Reload', desc: 'Fully reload all torpedo tubes instantly', cost: 300 },
+  ],
+};
+
+function renderShop(mode) {
+  const wrap = document.getElementById('shopItems');
+  if (!wrap) return;
+  const items = SHOP_ITEMS[mode] || SHOP_ITEMS.ground;
+  wrap.innerHTML = items.map((it) => `
+    <div class="shop-item">
+      <div>
+        <strong>${it.name}</strong>
+        <span>${it.desc}</span>
+      </div>
+      <button onclick="window.__game.buyShopItem('${it.id}')">${it.cost} Score</button>
+    </div>
+  `).join('');
+  const sub = document.getElementById('shopSub');
+  if (sub) {
+    sub.textContent = mode === 'naval'
+      ? 'Spend combat score on repairs, damage control and ordnance.'
+      : 'Spend combat score on ammunition, repairs, and mountain climbing upgrades.';
+  }
+}
+
 function buyShopItem(itemType) {
+  if (navalActive()) {
+    naval.buy(itemType);
+    return;
+  }
   if (!tank) return;
   let cost = 0;
   if (itemType === 'ammo') cost = 300;
@@ -533,7 +584,9 @@ function buyShopItem(itemType) {
 
 window.addEventListener('keydown', (e) => {
   keys.add(e.code);
-  if (e.code === 'KeyR' && running) {
+  if (navalActive()) {
+    if (!shopOpen) naval.onKey(e.code);
+  } else if (e.code === 'KeyR' && running && !shopOpen) {
     tank.rightSelf();
     flashMessage('Hull righted');
   }
@@ -555,11 +608,58 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) keys.
 
 canvas.addEventListener('mousedown', (e) => {
   if (!running) return;
+  if (navalActive()) { naval.onMouseDown(e.button); return; }
   if (e.button === 0) tryFire();
 });
+// ---------------------------------------------------------------------------
+// Mode select cards on the start screen
+// ---------------------------------------------------------------------------
+const keysGroundEl = document.getElementById('keysGround');
+const keysNavalEl = document.getElementById('keysNaval');
+for (const card of document.querySelectorAll('.mode-card')) {
+  card.addEventListener('click', () => {
+    selectedMode = card.dataset.mode;
+    for (const c of document.querySelectorAll('.mode-card')) {
+      c.classList.toggle('selected', c === card);
+    }
+    keysGroundEl.classList.toggle('hidden', selectedMode !== 'ground');
+    keysNavalEl.classList.toggle('hidden', selectedMode !== 'naval');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Naval boot — builds the sea battle while the loading bar runs
+// ---------------------------------------------------------------------------
+async function bootNaval() {
+  progress(0.0, 'Weighing anchor');
+  naval = new NavalBattle(renderer);
+  await nextFrame();
+  await naval.build(progress, nextFrame);
+
+  loadingEl.classList.add('hidden');
+  hudEl.classList.add('on');
+  renderShop('naval');
+  naval.start(keys);
+  running = true;
+  navalMode = true;
+  renderer.setAnimationLoop(loop);
+}
+
 document.getElementById('deploy').addEventListener('click', () => {
   deployed = true;
   startEl.classList.add('hidden');
+  document.body.classList.add(selectedMode === 'naval' ? 'mode-naval' : 'mode-ground');
+
+  if (selectedMode === 'naval' && !navalMode) {
+    loadingEl.classList.remove('hidden');
+    barEl.style.width = '0%';
+    loadTxtEl.textContent = 'Weighing anchor';
+    document.getElementById('tip').innerHTML =
+      'Charting 8.4 &times; 8.4 km of open water<br/>Raising steam &middot; loading shells &middot; fuelling the boilers';
+    bootNaval();
+    return;
+  }
+
   hudEl.classList.add('on');
   running = true;
 });
@@ -567,10 +667,12 @@ document.getElementById('deploy').addEventListener('click', () => {
 window.addEventListener('mousemove', (e) => {
   pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  if (naval) naval.onPointer(pointer.x, pointer.y);
 });
 
 window.addEventListener('wheel', (e) => {
   if (!running) return;
+  if (navalActive()) { naval.onWheel(e.deltaY); return; }
   cam.dist = clamp(cam.dist + Math.sign(e.deltaY) * 2.4, 9, 70);
 }, { passive: true });
 
@@ -764,6 +866,12 @@ function loop() {
   elapsed += dt;
   frameCount++;
 
+  // ---- naval engagement runs its own scene & sim ----
+  if (navalActive()) {
+    naval.frame(dt);
+    return;
+  }
+
   windUniforms.uTime.value = elapsed;
   tracks.update(dt);
   footprints.update(dt);
@@ -874,6 +982,7 @@ function loop() {
 // Events & Debug Handles
 // ---------------------------------------------------------------------------
 window.addEventListener('resize', () => {
+  if (naval) naval.onResize();
   applyQuality(qualityIdx);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -882,6 +991,7 @@ window.addEventListener('resize', () => {
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
 buildCompass();
+renderShop('ground');
 boot();
 
 window.__game = {
@@ -894,12 +1004,14 @@ window.__game = {
   get enemies() { return enemies; },
   get enemyMgr() { return enemyMgr; },
   hitTest: hitTestEnemy,
-  get score() { return score; },
+  get score() { return navalActive() ? naval.score : score; },
   get grass() { return grass; },
   get terrain() { return terrain; },
   get sea() { return sea; },
   get sun() { return sun; },
   get hemi() { return hemi; },
+  get naval() { return naval; },
+  get mode() { return navalActive() ? 'naval' : 'ground'; },
   addScore,
   cam,
   renderer,

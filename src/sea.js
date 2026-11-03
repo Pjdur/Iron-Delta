@@ -46,14 +46,17 @@ const WAVE_PREP = WAVES.map((w) => {
     amp: w.amp,
     speed: w.speed,
     steep: w.steep,
+    lenOrig: w.len,
   };
 });
 
 // Unroll the wave summation — keeps the shader simple and fast on the GPU.
-function buildWaveSum() {
+// Takes the prepared wave list of the instance so each Sea can have its own
+// wave set (the naval battlefield uses bigger, longer waves).
+function buildWaveSum(waves) {
   let code = '';
-  for (let i = 0; i < N; i++) {
-    const w = WAVE_PREP[i];
+  for (let i = 0; i < waves.length; i++) {
+    const w = waves[i];
     code += `
       {
         vec2 d${i} = vec2(${w.ndx.toFixed(6)}, ${w.ndz.toFixed(6)});
@@ -96,7 +99,7 @@ const vertexShader = `
     float foamSteep = 0.0;
     float crestH = 0.0;
 
-    ${buildWaveSum()}
+__WAVE_SUM__
 
     worldPos.xyz += disp;
 
@@ -236,19 +239,38 @@ const fragmentShader = `
 
 // ---------------------------------------------------------------------------
 export class Sea {
-  constructor(scene, sunDir) {
+  constructor(scene, sunDir, opts = {}) {
     this.scene = scene;
     this.sunDir = sunDir.clone();
 
+    const {
+      size = 2400,
+      segments = 288,
+      snapStep = 4.0,
+      waveScale = 1,       // multiplies every wave amplitude (GPU + CPU)
+      minWaveLen = 0,      // drop waves shorter than this (mesh undersampling)
+      fogDensity = 0.0018,
+      colors = {},
+    } = opts;
+
+    // Per-instance wave set: filtered by length, amplitudes scaled. The CPU
+    // surfaceHeight() and the generated shader both use this exact list so
+    // buoyancy and visuals never disagree.
+    this._waves = WAVE_PREP
+      .filter((w) => (minWaveLen ? w.lenOrig >= minWaveLen : true))
+      .map((w) => ({ ...w, amp: w.amp * waveScale }));
+
     // Big enough to cover the fogged visible area, dense enough to
     // resolve the smaller waves cleanly.
-    this.size = 2400;
-    this.segments = 288;
+    this.size = size;
+    this.segments = segments;
 
     const geo = new THREE.PlaneGeometry(
       this.size, this.size, this.segments, this.segments
     );
     geo.rotateX(-Math.PI / 2);
+
+    const C = (k, fallback) => (colors[k] !== undefined ? new THREE.Color(colors[k]) : fallback);
 
     this.material = new THREE.ShaderMaterial({
       uniforms: {
@@ -256,18 +278,18 @@ export class Sea {
         uSunDir:       { value: this.sunDir },
         // Three depth layers — abyss (deep below), deep (mid water column),
         // shallow (lit surface layer you see looking down at the sea).
-        uAbyssColor:   { value: new THREE.Color(0x03131c) },
-        uDeepColor:    { value: new THREE.Color(0x0c3245) },
-        uShallowColor: { value: new THREE.Color(0x1e6e7a) },
-        uSkyColor:     { value: new THREE.Color(0x9aaab3) },
-        uFoamColor:    { value: new THREE.Color(0xf2f6f8) },
+        uAbyssColor:   { value: C('abyss', new THREE.Color(0x03131c)) },
+        uDeepColor:    { value: C('deep', new THREE.Color(0x0c3245)) },
+        uShallowColor: { value: C('shallow', new THREE.Color(0x1e6e7a)) },
+        uSkyColor:     { value: C('sky', new THREE.Color(0x9aaab3)) },
+        uFoamColor:    { value: C('foam', new THREE.Color(0xf2f6f8)) },
         uFoamAmount:   { value: 0.55 },
-        uFogColor:     { value: new THREE.Color(0xa2adb3) },
+        uFogColor:     { value: C('fog', new THREE.Color(0xa2adb3)) },
         // Denser than the scene fog so the sea fades to the horizon haze
         // before the edge of the following-plane is visible.
-        uFogDensity:   { value: 0.0018 },
+        uFogDensity:   { value: fogDensity },
       },
-      vertexShader,
+      vertexShader: vertexShader.replace('__WAVE_SUM__', () => buildWaveSum(this._waves)),
       fragmentShader,
       transparent: false,
       // DoubleSide so the surface is also visible from underneath — the
@@ -283,7 +305,7 @@ export class Sea {
 
     // Snap to a grid so the wave pattern stays world-aligned as the
     // camera moves. Smaller than the segment size = no swimming.
-    this._snapStep = 4.0;
+    this._snapStep = snapStep;
     // last time the shader uniforms were advanced — surfaceHeight uses
     // the same value so the CPU side and the GPU side agree.
     this._currentTime = 0;
@@ -296,8 +318,9 @@ export class Sea {
    */
   surfaceHeight(x, z, time = this._currentTime) {
     let h = 0;
-    for (let i = 0; i < N; i++) {
-      const w = WAVE_PREP[i];
+    const waves = this._waves;
+    for (let i = 0; i < waves.length; i++) {
+      const w = waves[i];
       const phase = w.k * (w.ndx * x + w.ndz * z) - w.speed * time;
       h += w.amp * Math.sin(phase);
     }
